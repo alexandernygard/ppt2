@@ -1,0 +1,166 @@
+// PPTX export by "render, then measure": slides are laid out by the browser
+// (the same renderer as the canvas), then each element's measured box and
+// computed style is mapped to a native PowerPoint object. Charts become
+// native, editable PowerPoint charts.
+
+import PptxGenJS from "pptxgenjs"
+import type { DeckModel, ElementNode } from "@ppt2/sdk"
+
+const IN_PER_UNIT = 7.5 / 1080
+
+function toHex(css: string): { hex: string; alpha: number } | undefined {
+  let m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?/.exec(css)
+  if (m) return { hex: [m[1], m[2], m[3]].map((v) => Math.round(+v).toString(16).padStart(2, "0")).join(""), alpha: m[4] != null ? +m[4] : 1 }
+  m = /color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?/.exec(css)
+  if (m) return { hex: [m[1], m[2], m[3]].map((v) => Math.round(+v * 255).toString(16).padStart(2, "0")).join(""), alpha: m[4] != null ? +m[4] : 1 }
+}
+const hex = (css: string, fallback = "000000") => toHex(css)?.hex ?? fallback
+const plain = (s: string) => s.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/==([^=]+)==/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+const family = (ff: string) => ff.split(",")[0].replace(/["']/g, "").trim()
+
+async function toDataUrl(src: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(src, { mode: "cors" })
+    const blob = await res.blob()
+    return await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result as string); fr.readAsDataURL(blob) })
+  } catch { return undefined }
+}
+
+export async function exportPptx(deck: DeckModel, getSlideRoot: (index: number) => HTMLElement | null, fileName = "deck.pptx") {
+  const pptx = new PptxGenJS()
+  const wIn = deck.width * IN_PER_UNIT
+  pptx.defineLayout({ name: "PPT2", width: wIn, height: 7.5 })
+  pptx.layout = "PPT2"
+  pptx.title = deck.title
+
+  for (const slide of deck.slides) {
+    const root = getSlideRoot(slide.index)
+    const s = pptx.addSlide()
+    if (slide.notes) s.addNotes(slide.notes)
+    if (!root) continue
+    const rootCs = getComputedStyle(root)
+    s.background = { color: hex(rootCs.backgroundColor, "FFFFFF") }
+    const bg = slide.props.background
+    if (typeof bg === "string" && /^(https?:|data:)/.test(bg)) {
+      const data = await toDataUrl(bg)
+      if (data) s.addImage({ data, x: 0, y: 0, w: wIn, h: 7.5, sizing: { type: "cover", w: wIn, h: 7.5 } })
+    }
+    const a = root.getBoundingClientRect()
+    const scale = a.width / deck.width
+    const boxOf = (node: Element) => {
+      const b = node.getBoundingClientRect()
+      return { x: ((b.left - a.left) / scale) * IN_PER_UNIT, y: ((b.top - a.top) / scale) * IN_PER_UNIT, w: (b.width / scale) * IN_PER_UNIT, h: (b.height / scale) * IN_PER_UNIT }
+    }
+
+    const visit = async (el: ElementNode) => {
+      const node = root.querySelector(`[data-path="${el.path}"]`) as HTMLElement | null
+      if (!node) return
+      const box = boxOf(node)
+      const cs = getComputedStyle(node)
+      const textNode = (node.querySelector("h1,h2,blockquote,p,ul,div") as HTMLElement) ?? node
+      const tcs = getComputedStyle(textNode)
+      const base = {
+        ...box,
+        fontFace: family(tcs.fontFamily),
+        fontSize: Math.max(6, parseFloat(tcs.fontSize) * 0.5),
+        color: hex(cs.color),
+        align: (["left", "center", "right"].includes(tcs.textAlign) ? tcs.textAlign : "left") as "left" | "center" | "right",
+        valign: "top" as const,
+        margin: 0,
+        fit: "shrink" as const,
+      }
+      const p = el.props
+      switch (el.type) {
+        case "row": case "column": case "card":
+          if (el.type === "card") s.addShape(pptx.ShapeType.roundRect, { ...box, fill: { color: hex(getComputedStyle(node.firstElementChild!).backgroundColor, "FFFFFF") }, line: { color: hex(getComputedStyle(node.firstElementChild!).borderTopColor, "DDDDDD"), width: 1 }, rectRadius: 0.1 })
+          for (const c of el.children ?? []) await visit(c)
+          return
+        case "title": case "subtitle": case "quote":
+          s.addText(plain(el.text ?? "") + (el.type === "quote" && p.by ? `\n— ${p.by}` : ""), { ...base, bold: parseInt(tcs.fontWeight) >= 600 })
+          return
+        case "text": {
+          const runs = (el.text ?? "").split("\n").filter((l) => l.trim()).map((l) => {
+            const b = /^\s*[-*•]\s+(.*)$/.exec(l)
+            return { text: plain(b ? b[1] : l), options: { bullet: !!b, breakLine: true } }
+          })
+          s.addText(runs, base)
+          return
+        }
+        case "list":
+          s.addText(((p.items as string[]) ?? []).map((t) => ({ text: plain(t), options: { bullet: p.ordered ? { type: "number" as const } : true, breakLine: true } })), { ...base, fontSize: parseFloat(getComputedStyle(node.querySelector("li") ?? node).fontSize) * 0.5, paraSpaceAfter: 8 })
+          return
+        case "code":
+          s.addText(el.text ?? "", { ...base, fontFace: "Courier New", fill: { color: hex(getComputedStyle(node.firstElementChild!).backgroundColor, "F4F4F5") }, margin: 12 })
+          return
+        case "stat":
+          s.addText([
+            { text: String(p.value ?? ""), options: { fontSize: base.fontSize * 2.5, bold: true, breakLine: true } },
+            ...(p.label ? [{ text: String(p.label), options: { fontSize: 17, color: hex(rootCs.getPropertyValue("--p-muted")) || "777777", breakLine: true } }] : []),
+            ...(p.delta ? [{ text: String(p.delta), options: { fontSize: 15, color: hex(getComputedStyle(node).getPropertyValue("--p-accent")), bold: true } }] : []),
+          ], { ...base, fontSize: parseFloat(getComputedStyle(node.firstElementChild!.firstElementChild!).fontSize) * 0.5 / 2.5 })
+          return
+        case "image": {
+          const img = node.querySelector("img")
+          const data = p.src ? await toDataUrl(String(p.src)) : undefined
+          if (img && data) { const ib = boxOf(img); s.addImage({ data, ...ib, sizing: { type: p.fit === "contain" ? "contain" : "cover", w: ib.w, h: ib.h } }) }
+          return
+        }
+        case "shape": {
+          const shapeEl = node.querySelector("rect,ellipse,polygon,line") as SVGElement | null
+          const scs = shapeEl ? getComputedStyle(shapeEl) : undefined
+          const kind = (p.kind as string) ?? "rect"
+          const fill = scs && scs.fill !== "none" ? toHex(scs.fill) : undefined
+          const opacity = parseFloat(cs.opacity || "1")
+          const type = kind === "ellipse" ? pptx.ShapeType.ellipse : kind === "triangle" ? pptx.ShapeType.triangle : kind === "line" || kind === "arrow" ? pptx.ShapeType.line : p.radius ? pptx.ShapeType.roundRect : pptx.ShapeType.rect
+          const line = kind === "line" || kind === "arrow" ? { y: box.y + box.h / 2, h: 0 } : {}
+          s.addShape(type, {
+            ...box, ...line,
+            fill: fill ? { color: fill.hex, transparency: Math.round((1 - fill.alpha * opacity) * 100) } : undefined,
+            line: scs && scs.stroke !== "none" ? { color: hex(scs.stroke), width: parseFloat(scs.strokeWidth) * 0.5, endArrowType: kind === "arrow" ? "triangle" : undefined } : undefined,
+            rotate: (p.rotate as number) ?? 0,
+          })
+          if (el.text) s.addText(el.text, { ...base, align: "center", valign: "middle", color: hex(getComputedStyle(node.querySelector("svg + div") ?? node).color) })
+          return
+        }
+        case "chart": {
+          const data = (p.data as Record<string, unknown>[]) ?? []
+          const series = (Array.isArray(p.series) ? p.series : [p.series]) as string[]
+          const t = (p.type as string) ?? "bar"
+          const type = t === "line" ? pptx.ChartType.line : t === "area" ? pptx.ChartType.area : t === "pie" ? pptx.ChartType.pie : t === "donut" ? pptx.ChartType.doughnut : pptx.ChartType.bar
+          const cats = data.map((r) => String(r[String(p.category)]))
+          const chartData = (t === "pie" || t === "donut" ? series.slice(0, 1) : series).map((name) => ({ name, labels: cats, values: data.map((r) => Number(r[name]) || 0) }))
+          const muted = hex(rootCs.getPropertyValue("--p-muted").trim() || "#777")
+          const text = hex(rootCs.color)
+          s.addChart(type, chartData, {
+            ...box,
+            chartColors: deck.theme.colors.chart.map((c) => c.replace("#", "")),
+            barDir: p.horizontal ? "bar" : "col",
+            barGrouping: p.stacked ? "stacked" : "clustered",
+            showLegend: series.length > 1 || !!p.legend || t === "pie" || t === "donut",
+            legendPos: "b",
+            legendFontSize: 14,
+            legendColor: text,
+            catAxisLabelColor: muted,
+            valAxisLabelColor: muted,
+            catAxisLabelFontSize: 13,
+            valAxisLabelFontSize: 13,
+            valGridLine: { color: hex(rootCs.getPropertyValue("--p-border").trim() || "#ddd"), size: 1 },
+            catGridLine: { style: "none" },
+            showValue: !!p.labels,
+            holeSize: 55,
+          })
+          return
+        }
+        case "table": {
+          const columns = (p.columns as string[]) ?? []
+          const rows = (p.rows as (string | number)[][]) ?? []
+          const cell = (v: unknown, header = false) => ({ text: String(v), options: { bold: header, color: header ? hex(rootCs.getPropertyValue("--p-muted").trim() || "#777") : base.color } })
+          s.addTable([...(columns.length ? [columns.map((c) => cell(c, true))] : []), ...rows.map((r) => r.map((c) => cell(c)))], { ...box, fontFace: base.fontFace, fontSize: base.fontSize * 0.9, border: { type: "solid", pt: 0.5, color: hex(rootCs.getPropertyValue("--p-border").trim() || "#ddd") } })
+          return
+        }
+      }
+    }
+    for (const el of slide.elements) await visit(el)
+  }
+  await pptx.writeFile({ fileName })
+}

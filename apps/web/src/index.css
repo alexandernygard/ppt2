@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@import "@alexandernygard/components/theme.css";
+@source "../../../packages/react/src";
+
+html, body, #root { height: 100%; }
+body { overscroll-behavior: none; }
+
+.cm-editor { height: 100%; font-size: 13px; }
+.cm-editor .cm-scroller { font-family: "JetBrains Mono", ui-monospace, monospace; line-height: 1.55; }
+.cm-editor.cm-focused { outline: none; }
+.cm-flash { background: color-mix(in srgb, var(--highlight) 28%, transparent); transition: background 1s; }
+.cm-selected-element { background: color-mix(in srgb, var(--highlight) 12%, transparent); }
+
+/* Print = PDF export: only the render farm, one slide per page. */
+@page { size: 1920px 1080px; margin: 0; }
+@media print {
+  #app-shell { display: none !important; }
+  #render-farm { position: static !important; transform: none !important; left: 0 !important; }
+  #render-farm > div { break-after: page; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

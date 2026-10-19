@@ -1,0 +1,11 @@
+{
+  "name": "ppt2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @ppt2/web dev",
+    "build": "pnpm --filter @ppt2/web build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
