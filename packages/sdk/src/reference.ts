@@ -36,7 +36,7 @@ Layouts:
 ${Object.values(layouts).map((l) => `- ${l.name}: ${l.description} Slots: ${l.slots.join(", ")}`).join("\n")}
 
 ## Slide props
-layout, id, background (color, CSS gradient, or image URL), variant ("default" | "inverse" | "accent"),
+layout (a built-in layout or one the theme defines), id, master (false hides the theme's master elements), background (color, CSS gradient, or image URL), variant ("default" | "inverse" | "accent"),
 transition ("none" | "fade" | "slide" | "zoom"), columns (grid layout), notes (string, or use <Notes>).
 
 ## Elements (all accept the common props below)
@@ -77,6 +77,37 @@ Colors may be theme tokens: "accent", "muted", "text", "surface", "background", 
 ## Themes
 theme="${Object.keys(themes).join('" | "')}", or theme={{ base: "snow", colors: { accent: "#3fa36b" }, fonts: { heading: "Fraunces" } }}.
 ${Object.values(themes).map((t) => `- ${t.name}: ${t.dark ? "dark" : "light"}, accent ${t.colors.accent}, headings in ${t.fonts.heading.split(",")[0]}`).join("\n")}
+
+## Brand kit (company templates)
+A theme object can carry a company's brand so every slide is on-brand without per-slide work. Put it in one
+\`const brand = { ... }\` and pass theme={brand}. All keys are optional:
+\`\`\`tsx
+const brand = {
+  base: "snow",                       // built-in theme to start from
+  colors: { accent: "#0a7cff" },
+  fonts: { heading: "assets/Acme-Bold.woff2", body: "assets/Acme-Regular.woff2" }, // font files are registered for you
+  logo: { src: "assets/logo.svg", position: "top-right", height: 56, inverse: "assets/logo-white.svg" },
+  footer: "Acme Corp · Confidential",  // {n}, {total} and {title} are replaced
+  slideNumbers: true,
+  master: <><Shape kind="rect" fill="accent" x={0} y={0} w={16} h={1080} /></>, // fixed elements on every slide
+  layouts: {
+    cover: { base: "title", variant: "inverse", master: false, elements: <><Image src="assets/hero.jpg" x={1100} y={0} w={820} h={1080} /></> },
+    chapter: { base: "section", variant: "accent" },
+  },
+}
+\`\`\`
+- logo: "assets/<name>" or URL, or { src, position: "top-left"|"top-right"|"bottom-left"|"bottom-right", height, inverse }.
+  inverse is used on inverse/accent slides.
+- fonts: each of heading/body/mono is a family name, a font file ("assets/x.woff2", .woff, .ttf, .otf), an
+  object { src, family, weight, style }, or an array of those for several weights of one family.
+- footer and slide numbers sit in the bottom margin (y > 1000); keep content above it.
+- master: JSX elements with x/y/w/h drawn behind every slide's content. They are part of the theme, not the
+  slide: edit them in the theme, never copy them onto slides.
+- layouts: company layouts. Use them like built-in ones: <Slide layout="cover">. base picks the built-in layout
+  that places content; background/variant/transition are defaults the slide can override; elements are fixed
+  elements for that layout; master: false hides the theme master, logo, footer and number.
+- <Slide master={false}> hides the master elements, logo, footer and number on one slide.
+When a deck has a brand kit, use its layouts and colors rather than inventing new styling.
 
 ## Data
 \`csv\` turns CSV text into rows: const sales = csv\`month,revenue\\nJan,12\\nFeb,18\`

@@ -1,12 +1,12 @@
 // The deck library: many decks in IndexedDB, autosave, version history,
-// assets (images stored with each deck) and two-way sync with files on disk.
+// assets (images and fonts stored with each deck) and two-way sync with files on disk.
 //
 // The editor store still holds one source string; this module loads a deck
 // into it, and saves whatever the store's source becomes.
 
 import { create } from "zustand"
 import { toast } from "@alexandernygard/components"
-import { compile, assetRefs, setProps, STARTER_DECK } from "@ppt2/sdk"
+import { compile, assetRefs, fontFamilyOf, setProps, STARTER_DECK } from "@ppt2/sdk"
 import { addAssetUrl, setAssetUrls } from "@ppt2/react"
 import { db, type DeckRecord, type LinkRecord, type VersionRecord } from "./lib/db"
 import { useStore } from "./store"
@@ -120,6 +120,30 @@ export async function addImages(files: Blob[], names: string[] = []): Promise<{ 
     addAssetUrl(name, u)
     set({ assets: { ...get().assets, [name]: { width, height } } })
     out.push({ ref: `assets/${name}`, width, height })
+  }
+  return out
+}
+
+const FONT_TYPES: Record<string, string> = { woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", otf: "font/otf" }
+
+/** Store font files with the current deck. Returns their references ("assets/<name>") and the family each registers as. */
+export async function addFonts(files: File[]): Promise<{ ref: string; family: string }[]> {
+  const deckId = get().currentId
+  const out: { ref: string; family: string }[] = []
+  for (const file of files) {
+    const ext = /\.(woff2?|ttf|otf)$/i.exec(file.name)?.[1].toLowerCase()
+    if (!ext) throw new Error(`${file.name} isn't a font file (.woff2, .woff, .ttf or .otf)`)
+    // Keep the file's own name (minus odd characters): it becomes the font's family name.
+    const base = file.name.slice(0, -ext.length - 1).replace(/[^A-Za-z0-9 _-]+/g, "").trim().replace(/\s+/g, "-") || "font"
+    let name = `${base}.${ext}`
+    for (let n = 2; get().assets[name]; n++) name = `${base}-${n}.${ext}`
+    const blob = file.type ? file : new Blob([file], { type: FONT_TYPES[ext] })
+    await db.put("assets", { key: `${deckId}/${name}`, deckId, name, blob, createdAt: Date.now() })
+    const u = URL.createObjectURL(blob)
+    objectUrls.push(u)
+    addAssetUrl(name, u)
+    set({ assets: { ...get().assets, [name]: {} } })
+    out.push({ ref: `assets/${name}`, family: fontFamilyOf(name) })
   }
   return out
 }
@@ -355,13 +379,13 @@ async function importFolderAssets(dir: FileSystemDirectoryHandle) {
   if (!assets) return
   const files: File[] = []
   for await (const h of assets.values()) {
-    if (h.kind !== "file" || get().assets[h.name] || !/\.(png|jpe?g|gif|webp|svg|avif)$/i.test(h.name)) continue
+    if (h.kind !== "file" || get().assets[h.name] || !/\.(png|jpe?g|gif|webp|svg|avif|woff2?|ttf|otf)$/i.test(h.name)) continue
     files.push(await (h as FileSystemFileHandle).getFile())
   }
   // Keep file names as they are on disk, since the source refers to them.
   const deckId = get().currentId
   for (const f of files) {
-    const bmp = f.type !== "image/svg+xml" ? await createImageBitmap(f).catch(() => undefined) : undefined
+    const bmp = f.type.startsWith("image/") && f.type !== "image/svg+xml" ? await createImageBitmap(f).catch(() => undefined) : undefined
     await db.put("assets", { key: `${deckId}/${f.name}`, deckId, name: f.name, blob: f, width: bmp?.width, height: bmp?.height, createdAt: Date.now() })
     const u = URL.createObjectURL(f)
     objectUrls.push(u)

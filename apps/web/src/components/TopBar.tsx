@@ -22,7 +22,7 @@ import {
   TooltipTrigger,
   toast,
 } from "@alexandernygard/components"
-import { CheckIcon, ChevronDownIcon, CloudAlertIcon, CodeIcon, Columns2Icon, FileIcon, FolderIcon, HardDriveIcon, HistoryIcon, LibraryIcon, LinkIcon, LoaderIcon, PlayIcon, PresentationIcon, Redo2Icon, SettingsIcon, Undo2Icon, ImageIcon, FileUpIcon, FilePlusIcon, FolderOpenIcon, SaveIcon, Unlink2Icon } from "lucide-react"
+import { CheckIcon, ChevronDownIcon, CloudAlertIcon, CodeIcon, Columns2Icon, FileIcon, FolderIcon, HardDriveIcon, HistoryIcon, LibraryIcon, LinkIcon, LoaderIcon, PlayIcon, PresentationIcon, Redo2Icon, SettingsIcon, StampIcon, Undo2Icon, ImageIcon, FileUpIcon, FilePlusIcon, FolderOpenIcon, SaveIcon, Unlink2Icon } from "lucide-react"
 import { STARTER_DECK, themes } from "@ppt2/sdk"
 import { exportPptx } from "@ppt2/react"
 import { useStore, type View } from "../store"
@@ -30,6 +30,7 @@ import { farmSlide, settled } from "./RenderFarm"
 import { createDeck, diskSupported, importText, openFile, openFolder, reconnect, saveToFile, saveToFolder, unlink, useLibrary } from "../library"
 import { DeckLibrary } from "./DeckLibrary"
 import { HistoryDialog } from "./HistoryDialog"
+import { BrandPanel } from "./BrandPanel"
 
 function SaveStatus() {
   const status = useLibrary((s) => s.status)
@@ -66,8 +67,9 @@ export function TopBar({ onSettings }: { onSettings: () => void }) {
   const fileInput = useRef<HTMLInputElement>(null)
   const [library, setLibrary] = useState(false)
   const [history, setHistory] = useState(false)
+  const [brand, setBrand] = useState(false)
   const link = useLibrary((s) => s.link)
-  const themeName = typeof deck?.themeInput === "string" ? deck.themeInput : "custom"
+  const themeName = typeof deck?.themeInput === "string" ? deck.themeInput : deck?.themeInput.base ?? "snow"
 
   const download = (name: string, text: string, type = "text/plain") => {
     const a = document.createElement("a")
@@ -124,9 +126,14 @@ export function TopBar({ onSettings }: { onSettings: () => void }) {
               </span>
             </SelectItem>
           ))}
-          {themeName === "custom" && <SelectItem value="custom" disabled>Custom (in code)</SelectItem>}
         </SelectContent>
       </Select>
+
+      <Tooltip>
+        <TooltipTrigger asChild><Button size="sm" variant={brand ? "secondary" : "ghost"} disabled={!deck} onClick={() => setBrand((b) => !b)}><StampIcon /> Brand</Button></TooltipTrigger>
+        <TooltipContent>Logo, footer, slide numbers and fonts</TooltipContent>
+      </Tooltip>
+      <BrandPanel open={brand} onOpenChange={setBrand} />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild><Button size="sm" variant="ghost"><FileIcon /> File</Button></DropdownMenuTrigger>

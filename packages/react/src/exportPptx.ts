@@ -5,6 +5,7 @@
 
 import PptxGenJS from "pptxgenjs"
 import type { DeckModel, ElementNode } from "@ppt2/sdk"
+import { brandOf } from "./SlideView"
 
 const IN_PER_UNIT = 7.5 / 1080
 
@@ -62,6 +63,19 @@ function croppedImage(img: HTMLImageElement, frame: HTMLElement, p: Record<strin
   } catch { return undefined } // tainted canvas: fall back to the uncropped image
 }
 
+/** Rasterize a logo at its rendered size (SVGs included), so PowerPoint shows it exactly as on the canvas. */
+function logoPng(img: HTMLImageElement): string | undefined {
+  try {
+    const w = img.offsetWidth, h = img.offsetHeight
+    if (!w || !h) return
+    const c = document.createElement("canvas")
+    const k = Math.min(4, 2000 / w)
+    c.width = Math.round(w * k); c.height = Math.round(h * k)
+    c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height)
+    return c.toDataURL("image/png")
+  } catch { return undefined }
+}
+
 async function toDataUrl(src: string): Promise<string | undefined> {
   try {
     const res = await fetch(src, { mode: "cors" })
@@ -76,6 +90,8 @@ export async function exportPptx(deck: DeckModel, getSlideRoot: (index: number) 
   pptx.defineLayout({ name: "PPT2", width: wIn, height: 7.5 })
   pptx.layout = "PPT2"
   pptx.title = deck.title
+  // Brand fonts must be loaded before measuring, or text boxes get the fallback font's metrics.
+  await document.fonts?.ready
 
   for (const slide of deck.slides) {
     const root = getSlideRoot(slide.index)
@@ -240,7 +256,22 @@ export async function exportPptx(deck: DeckModel, getSlideRoot: (index: number) 
         }
       }
     }
-    for (const el of slide.elements) await visit(el)
+    const brand = brandOf(deck, slide)
+    for (const el of [...brand.behind, ...slide.elements.filter((e) => e.props.x == null && e.props.y == null)]) await visit(el)
+    // Logo, footer and slide number sit above the flow, below free-floating elements (as on the canvas).
+    for (const n of root.querySelectorAll<HTMLElement>("[data-chrome]")) {
+      const b = boxOf(n)
+      if (n instanceof HTMLImageElement) {
+        const data = logoPng(n) ?? await toDataUrl(n.currentSrc || n.src)
+        if (data) s.addImage({ data, ...b })
+        continue
+      }
+      const ncs = getComputedStyle(n)
+      const right = n.closest<HTMLElement>("[data-chrome-layer] > div")?.style.right !== ""
+      // Pad the box: PowerPoint's text metrics differ slightly from the browser's.
+      s.addText(n.textContent ?? "", { x: right ? b.x - 1 : b.x, y: b.y - 0.05, w: b.w + 1, h: b.h + 0.1, margin: 0, valign: "middle", align: right ? "right" : "left", fontFace: family(ncs.fontFamily), fontSize: parseFloat(ncs.fontSize) * 0.5, color: hex(ncs.color, "777777") })
+    }
+    for (const el of slide.elements.filter((e) => e.props.x != null || e.props.y != null)) await visit(el)
   }
   await pptx.writeFile({ fileName })
 }

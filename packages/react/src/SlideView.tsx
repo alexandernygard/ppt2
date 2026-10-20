@@ -2,6 +2,7 @@ import { forwardRef, type CSSProperties, type ReactNode } from "react"
 import { assignSlots, isAbsolute, type DeckModel, type ElementNode, type LayoutName, type SlideNode } from "@ppt2/sdk"
 import { ElementView, RenderContext, SlotContext, type RenderOptions } from "./elements"
 import { slideStyle, themeVars } from "./theme"
+import { registerFonts, resolveSrc } from "./assets"
 import "./styles"
 
 const PAD_X = 120
@@ -98,6 +99,42 @@ function Layout({ slide, width, height }: { slide: SlideNode; width: number; hei
   }
 }
 
+/** What the theme adds to a slide: fixed elements behind the content, and whether the logo/footer/number show. */
+export function brandOf(deck: DeckModel, slide: SlideNode): { behind: ElementNode[]; chrome: boolean } {
+  const on = slide.props.master !== false
+  const layout = slide.themeLayout ? deck.theme.layouts?.[slide.themeLayout] : undefined
+  return { behind: [...(on ? deck.theme.master ?? [] : []), ...(layout?.elements ?? [])], chrome: on }
+}
+
+const CHROME_X = PAD_X
+const CHROME_Y = 40
+
+/** Logo, footer and slide number, in the slide's margins. */
+function Chrome({ deck, slide }: { deck: DeckModel; slide: SlideNode }) {
+  const t = deck.theme
+  const dark = slide.props.variant === "inverse" || slide.props.variant === "accent" || slide.layout === "full-image"
+  const logoSrc = t.logo ? resolveSrc((dark && t.logo.inverse) || t.logo.src) : ""
+  const logo = t.logo && logoSrc ? <img key="logo" data-chrome="logo" src={logoSrc} alt="" draggable={false} style={{ height: t.logo.height, width: "auto", display: "block" }} /> : null
+  const footer = t.footer
+    ? <span key="footer" data-chrome="footer">{t.footer.replace(/\{n\}/g, String(slide.index + 1)).replace(/\{total\}/g, String(deck.slides.length)).replace(/\{title\}/g, deck.title)}</span>
+    : null
+  const number = t.slideNumbers ? <span key="number" data-chrome="number" style={{ fontVariantNumeric: "tabular-nums" }}>{slide.index + 1}</span> : null
+  const pos = t.logo?.position ?? "top-right"
+  const bottomLeft = [pos === "bottom-left" && logo, footer].filter(Boolean)
+  const bottomRight = [number, pos === "bottom-right" && logo].filter(Boolean)
+  const text: CSSProperties = {
+    position: "absolute", display: "flex", alignItems: "center", gap: 28, fontSize: 22, lineHeight: 1, letterSpacing: "0.01em",
+    color: slide.layout === "full-image" ? "rgba(255,255,255,.8)" : "var(--p-muted)", fontFamily: "var(--p-font-body)",
+  }
+  return (
+    <div data-chrome-layer style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+      {logo && pos.startsWith("top") && <div style={{ ...text, top: CHROME_Y, [pos === "top-left" ? "left" : "right"]: CHROME_X }}>{logo}</div>}
+      {bottomLeft.length > 0 && <div style={{ ...text, bottom: CHROME_Y, left: CHROME_X }}>{bottomLeft}</div>}
+      {bottomRight.length > 0 && <div style={{ ...text, bottom: CHROME_Y, right: CHROME_X }}>{bottomRight}</div>}
+    </div>
+  )
+}
+
 export interface SlideViewProps extends Partial<RenderOptions> {
   deck: DeckModel
   slide: SlideNode
@@ -113,6 +150,8 @@ export const SlideView = forwardRef<HTMLDivElement, SlideViewProps>(function Sli
     slide = { ...slide, elements: slide.elements.map((el) => (overrides[el.path] ? { ...el, props: { ...el.props, ...overrides[el.path] } } : el)) }
   }
   const absolute = slide.elements.filter(isAbsolute)
+  const brand = brandOf(deck, slide)
+  registerFonts(deck.theme.fontFaces)
   return (
     <RenderContext.Provider value={{ mode, step, overrides, hidden }}>
       <div
@@ -133,7 +172,16 @@ export const SlideView = forwardRef<HTMLDivElement, SlideViewProps>(function Sli
           ...style,
         }}
       >
+        {brand.behind.length > 0 && (
+          // Part of the theme, not the slide: not selectable on the canvas.
+          <div data-master style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+            <SlotContext.Provider value={{ layout: slide.layout, slot: "free" }}>
+              {brand.behind.map((el) => <ElementView key={el.path} el={el} absolute />)}
+            </SlotContext.Provider>
+          </div>
+        )}
         <Layout slide={slide} width={deck.width} height={deck.height} />
+        {brand.chrome && <Chrome deck={deck} slide={slide} />}
         <SlotContext.Provider value={{ layout: slide.layout, slot: "free" }}>
           {absolute.map((el) => <ElementView key={el.path} el={el} absolute />)}
         </SlotContext.Provider>

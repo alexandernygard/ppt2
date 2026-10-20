@@ -7,6 +7,7 @@ import { toast } from "@alexandernygard/components"
 import {
   compile,
   setProps,
+  setThemeProps,
   setText,
   moveSlide as moveSlidePatch,
   insertSlide,
@@ -74,6 +75,8 @@ interface State {
   deleteSlide: (index: number) => void
   moveSlide: (from: number, to: number) => void
   setTheme: (theme: string) => void
+  /** Set or remove (undefined) brand-kit keys of the deck's theme. */
+  setBrand: (values: Record<string, unknown>) => void
   setSlideProps: (index: number, props: Record<string, unknown>) => void
   setNotes: (index: number, text: string) => void
 }
@@ -277,7 +280,11 @@ export const useStore = create<State>()((set, get) => ({
     if (get().patch((src, deck) => moveSlidePatch(src, deck.src!, from, to), "Reorder")) set({ current: to, selected: null })
   },
   setTheme(theme) {
-    get().patch((src, deck) => setProps(src, deck.src!, { theme }), "Theme")
+    // Keeps the brand kit (logo, footer, fonts…) and swaps only the base theme.
+    get().patch((src, deck) => setThemeProps(src, deck.src!, { base: theme }), "Theme")
+  },
+  setBrand(values) {
+    get().patch((src, deck) => setThemeProps(src, deck.src!, values), "Brand")
   },
   setSlideProps(index, props) {
     get().patch((src, deck) => setProps(src, deck.slides[index].src!, props), "Slide")

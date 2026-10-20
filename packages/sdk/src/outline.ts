@@ -19,19 +19,27 @@ function summarize(el: ElementNode): string {
 
 /** A compact, human/LLM-readable outline of the deck. */
 export function outline(deck: DeckModel): string {
-  const lines = [`Deck "${deck.title}" — theme ${deck.theme.name}, ${deck.aspect}, ${deck.slides.length} slides`]
+  const t = deck.theme
+  const brand = [t.logo && "logo", t.footer && "footer", t.slideNumbers && "slide numbers", t.fontFaces?.length && "font files", t.master?.length && `${t.master.length} master elements`, t.layouts && `layouts ${Object.keys(t.layouts).join(", ")}`].filter(Boolean)
+  const lines = [`Deck "${deck.title}" — theme ${t.name}${brand.length ? ` (brand: ${brand.join(", ")})` : ""}, ${deck.aspect}, ${deck.slides.length} slides`]
   for (const s of deck.slides) {
-    lines.push(`Slide ${s.index + 1} [${s.layout}]${s.props.transition ? ` transition=${s.props.transition}` : ""}`)
+    lines.push(`Slide ${s.index + 1} [${s.themeLayout ?? s.layout}]${s.props.master === false ? " master=false" : ""}${s.props.transition ? ` transition=${s.props.transition}` : ""}`)
     for (const el of s.elements) lines.push(`  - ${summarize(el)}${el.props.x != null ? " (absolute)" : ""}${el.props.step ? ` step ${el.props.step}` : ""}`)
     if (s.notes) lines.push(`  notes: ${s.notes.replace(/\n/g, " ").slice(0, 100)}`)
   }
   return lines.join("\n")
 }
 
-/** Asset files the deck references ("assets/<name>"), for saving a deck with its images. */
+/** Asset files the deck references ("assets/<name>"), for saving a deck with its images and fonts. */
 export function assetRefs(deck: DeckModel): string[] {
   const out = new Set<string>()
   const add = (v: unknown) => { if (typeof v === "string" && v.startsWith("assets/")) out.add(v.slice(7)) }
+  const t = deck.theme
+  add(t.logo?.src)
+  add(t.logo?.inverse)
+  t.fontFaces?.forEach((f) => add(f.src))
+  walkEls(t.master ?? [], (el) => add(el.props.src))
+  for (const l of Object.values(t.layouts ?? {})) { add(l.props.background); walkEls(l.elements, (el) => add(el.props.src)) }
   for (const s of deck.slides) {
     add(s.props.background)
     walkEls(s.elements, (el) => add(el.props.src))

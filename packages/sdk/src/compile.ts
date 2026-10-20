@@ -11,10 +11,10 @@ import MagicString from "magic-string"
 import { transform } from "sucrase"
 import { parseSource, walk, dedentText, lineCol, type Node } from "./ast"
 import * as runtime from "./runtime"
-import { isPNode, type PNode, type Child } from "./runtime"
+import { isPNode, flatten, type PNode, type Child } from "./runtime"
 import { resolveTheme } from "./themes"
 import { layouts } from "./layouts"
-import type { CompileResult, DeckModel, Diagnostic, ElementNode, ElementType, LayoutName, SlideNode, Aspect } from "./types"
+import type { CompileResult, DeckModel, Diagnostic, ElementNode, ElementType, LayoutName, SlideNode, Aspect, Theme } from "./types"
 
 const ASPECTS: Record<Aspect, number> = { "16:9": 1920, "4:3": 1440, "16:10": 1728, "1:1": 1080 }
 const TEXT_TYPES = new Set(["title", "subtitle", "text", "code", "quote", "shape", "notes", "stat", "step", "node"])
@@ -88,13 +88,22 @@ function cleanMessage(m: string) {
 
 export function normalizeDeck(node: PNode, source = "", warnings: Diagnostic[] = []): DeckModel {
   const p = node.props
-  const { theme, warning } = resolveTheme(p.theme)
-  if (warning) warnings.push({ severity: "warning", message: warning })
   const aspect: Aspect = p.aspect in ASPECTS ? p.aspect : "16:9"
   const warn = (message: string, src?: number, slide?: number) => {
     const loc = src != null && source ? lineCol(source, src) : undefined
     warnings.push({ severity: "warning", message, line: loc?.line, column: loc?.column, slide })
   }
+  // Theme JSX (master elements, layout elements) normalizes like slide content, under its own paths.
+  const elementsOf = (jsx: unknown, prefix: string) => {
+    const out: ElementNode[] = []
+    for (const child of flatten([jsx])) {
+      const el = normalizeElement(child, `${prefix}/${out.length}`, warn, undefined)
+      if (el) out.push(el)
+    }
+    return out
+  }
+  const { theme, warning } = resolveTheme(p.theme, elementsOf)
+  if (warning) for (const message of warning.split("\n")) warnings.push({ severity: "warning", message })
 
   const slides: SlideNode[] = []
   for (const child of node.children) {
@@ -106,7 +115,7 @@ export function normalizeDeck(node: PNode, source = "", warnings: Diagnostic[] =
       warn(`<${child.type}> must be inside a <Slide>`, child.src)
       continue
     }
-    slides.push(normalizeSlide(child, slides.length, warn))
+    slides.push(normalizeSlide(child, slides.length, warn, theme))
   }
 
   return {
@@ -122,11 +131,17 @@ export function normalizeDeck(node: PNode, source = "", warnings: Diagnostic[] =
   }
 }
 
-function normalizeSlide(node: PNode, index: number, warn: (m: string, src?: number, slide?: number) => void): SlideNode {
-  const { layout: rawLayout, id, notes: notesProp, ...props } = node.props
+function normalizeSlide(node: PNode, index: number, warn: (m: string, src?: number, slide?: number) => void, theme: Theme): SlideNode {
+  const { layout: rawLayout, id, notes: notesProp, ...own } = node.props
   let layout: LayoutName = rawLayout ?? "content"
-  if (!(layout in layouts)) {
-    warn(`Unknown layout "${rawLayout}". Layouts: ${Object.keys(layouts).join(", ")}`, node.src, index)
+  let props: Record<string, unknown> = own
+  const themeLayout = theme.layouts?.[rawLayout]
+  if (themeLayout) {
+    layout = themeLayout.base
+    props = { ...themeLayout.props, ...own }
+  } else if (!(layout in layouts)) {
+    const names = [...Object.keys(theme.layouts ?? {}), ...Object.keys(layouts)]
+    warn(`Unknown layout "${rawLayout}". Layouts: ${names.join(", ")}`, node.src, index)
     layout = "content"
   }
   let notes = typeof notesProp === "string" ? notesProp : ""
@@ -146,6 +161,7 @@ function normalizeSlide(node: PNode, index: number, warn: (m: string, src?: numb
     id: id ?? `slide-${index + 1}`,
     src: node.src,
     layout,
+    ...(themeLayout ? { themeLayout: themeLayout.name } : {}),
     props,
     elements,
     notes,
@@ -153,7 +169,7 @@ function normalizeSlide(node: PNode, index: number, warn: (m: string, src?: numb
   }
 }
 
-function normalizeElement(child: Child, path: string, warn: (m: string, src?: number, slide?: number) => void, slide: number, parent?: string): ElementNode | undefined {
+function normalizeElement(child: Child, path: string, warn: (m: string, src?: number, slide?: number) => void, slide: number | undefined, parent?: string): ElementNode | undefined {
   const item = parent ? ITEM_OF[parent] : undefined
   if (!isPNode(child)) {
     const text = String(child).trim()

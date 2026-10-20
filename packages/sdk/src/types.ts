@@ -88,7 +88,11 @@ export interface SlideNode {
     background?: string
     transition?: Transition
     variant?: "default" | "inverse" | "accent"
+    /** false hides the theme's master elements, logo, footer and slide number. */
+    master?: boolean
   }
+  /** The theme layout the slide uses (layout="cover"), if any; `layout` is then its base layout. */
+  themeLayout?: string
   elements: ElementNode[]
   notes: string
   /** Where notes live in source: a <Notes> element or the notes prop. */
@@ -108,6 +112,41 @@ export interface ThemeColors {
   chart: string[]
 }
 
+export type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right"
+
+/** A font file: "assets/Brand.woff2", a URL, or the file with explicit metadata. */
+export type FontSource = string | { family?: string; src: string; weight?: number | string; style?: "normal" | "italic" }
+
+/** A font file the renderer registers with @font-face. */
+export interface ThemeFontFace {
+  family: string
+  src: string
+  /** CSS font-weight descriptor; a range ("100 900") when the file's weight is unknown. */
+  weight: string
+  style: "normal" | "italic"
+}
+
+export interface ThemeLogo {
+  /** "assets/<name>" or a URL. */
+  src: string
+  position: Corner
+  /** Height in slide units. */
+  height: number
+  /** Logo for dark slides (variant inverse/accent, or a dark theme's default). */
+  inverse?: string
+}
+
+/** A company layout: a built-in layout plus slide defaults and fixed elements. */
+export interface ThemeLayout {
+  name: string
+  base: LayoutName
+  description?: string
+  /** Slide props the layout applies (background, variant, transition, master). The slide's own props win. */
+  props: Record<string, unknown>
+  /** Fixed elements drawn on every slide that uses the layout, behind the slide's content. */
+  elements: ElementNode[]
+}
+
 export interface Theme {
   name: string
   label: string
@@ -120,13 +159,44 @@ export interface Theme {
   radius: number
   /** Decorative background treatment. */
   backdrop?: "none" | "gradient" | "grid" | "glow"
+  // --- brand kit ---
+  logo?: ThemeLogo
+  /** Footer text on every slide. {n}, {total} and {title} are replaced. */
+  footer?: string
+  slideNumbers?: boolean
+  /** Font files to register; theme.fonts refers to them by family. */
+  fontFaces?: ThemeFontFace[]
+  /** Fixed elements drawn on every slide, behind its content. Paths are "m/<i>". */
+  master?: ElementNode[]
+  layouts?: Record<string, ThemeLayout>
 }
 
-export type ThemeInput = string | (Partial<Omit<Theme, "colors" | "fonts">> & {
+export interface ThemeLayoutInput {
+  /** Built-in layout that places the slide's content. Default "content". */
+  base?: LayoutName
+  description?: string
+  background?: string
+  variant?: "default" | "inverse" | "accent"
+  transition?: Transition
+  /** false: no theme master, logo, footer or number on this layout. */
+  master?: boolean
+  /** JSX: elements drawn on every slide with this layout. */
+  elements?: unknown
+}
+
+export interface ThemeObjectInput extends Partial<Omit<Theme, "colors" | "fonts" | "logo" | "fontFaces" | "master" | "layouts">> {
   base?: string
   colors?: Partial<ThemeColors>
-  fonts?: Partial<Theme["fonts"]>
-})
+  /** Family names, or font files ("assets/Brand.woff2") that are registered for you. */
+  fonts?: Partial<Record<keyof Theme["fonts"], string | FontSource | FontSource[]>>
+  /** "assets/logo.svg", or the logo with options. */
+  logo?: string | (Partial<ThemeLogo> & { src: string })
+  /** JSX (a fragment or an array) drawn on every slide. */
+  master?: unknown
+  layouts?: Record<string, ThemeLayoutInput>
+}
+
+export type ThemeInput = string | ThemeObjectInput
 
 export interface DeckModel {
   title: string

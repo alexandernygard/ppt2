@@ -61,11 +61,14 @@ export interface DeckProps {
 }
 export interface SlideProps {
   id?: string
-  layout?: LayoutName
+  /** A built-in layout, or one the theme defines. */
+  layout?: LayoutName | (string & {})
   background?: string
   variant?: "default" | "inverse" | "accent"
   transition?: Transition
   notes?: string
+  /** false hides the theme's master elements, logo, footer and slide number on this slide. */
+  master?: boolean
 }
 export interface ListProps extends BaseProps { items: string[]; ordered?: boolean }
 export interface ImageProps extends BaseProps {

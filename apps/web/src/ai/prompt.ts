@@ -31,7 +31,7 @@ export function userTurn(opts: { text: string; source: string; slide: number; se
   const assets = Object.entries(opts.assets ?? {})
   const parts = [
     `<deck_source>\n${opts.source}\n</deck_source>`,
-    ...(assets.length ? [`<deck_assets>Images the user added to this deck (use as src="assets/<name>"):\n${assets.map(([n, a]) => `- ${n}${a.width ? ` (${a.width}×${a.height})` : ""}`).join("\n")}\n</deck_assets>`] : []),
+    ...(assets.length ? [`<deck_assets>Files the user added to this deck (images as src="assets/<name>", fonts in theme.fonts):\n${assets.map(([n, a]) => `- ${n}${a.width ? ` (${a.width}×${a.height})` : ""}`).join("\n")}\n</deck_assets>`] : []),
     `<editor_state>The user is looking at slide ${opts.slide + 1}.${opts.selection ? ` Selected element ${opts.selection.path}${opts.selection.code ? `:\n${opts.selection.code}` : ""}` : ""}</editor_state>`,
     ...opts.attachments.map((a) => `<attachment name="${a.name}">\n${a.text}\n</attachment>`),
     opts.text,

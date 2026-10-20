@@ -106,6 +106,108 @@ export function setProps(source: string, src: number, props: Record<string, unkn
   return { source: ms.toString(), template: isTemplate(ancestors) }
 }
 
+// --- theme -------------------------------------------------------------------------
+
+const keyName = (p: Node): string | undefined =>
+  p.type === "ObjectProperty" && !p.computed ? (p.key.type === "Identifier" ? p.key.name : typeof p.key.value === "string" ? p.key.value : undefined) : undefined
+
+/** The object literal a `theme={brand}` identifier points at (const brand = { ... }). */
+function constObject(source: string, name: string): Node | undefined {
+  let found: Node | undefined
+  walk(parseSource(source), (n) => {
+    if (found) return false
+    if (n.type === "VariableDeclarator" && n.id.type === "Identifier" && n.id.name === name) {
+      let init = n.init
+      while (init && (init.type === "TSAsExpression" || init.type === "TSSatisfiesExpression")) init = init.expression
+      if (init?.type === "ObjectExpression") found = init
+      return false
+    }
+  })
+  return found
+}
+
+/**
+ * Set (or remove, with undefined) keys of the Deck's theme, keeping the rest as written.
+ * A theme name becomes { base: name, ... }; an object only left with `base` turns back into the name.
+ * Follows theme={brand} to `const brand = { ... }` so company templates can live in one place.
+ */
+export function setThemeProps(source: string, deckSrc: number, values: Record<string, unknown>): PatchResult {
+  const { node } = locate(source, deckSrc)
+  const attr = (node.openingElement.attributes as Node[]).find((a) => a.type === "JSXAttribute" && a.name.name === "theme")
+  let name: string | undefined
+  let obj: Node | undefined
+  const v = attr?.value?.type === "JSXExpressionContainer" ? attr.value.expression : attr?.value
+  if (v?.type === "StringLiteral") name = v.value
+  else if (v?.type === "ObjectExpression") obj = v
+  else if (v?.type === "Identifier") obj = constObject(source, v.name)
+  if (attr && !obj && name == null) throw new PatchError("The theme is computed in code. Edit it in the code view.")
+
+  if (!obj) {
+    const theme: Record<string, unknown> = { base: name ?? "snow" }
+    for (const [k, x] of Object.entries(values)) if (x !== undefined) theme[k] = x
+    const keys = Object.keys(theme)
+    return setProps(source, deckSrc, { theme: keys.length === 1 ? theme.base : theme })
+  }
+
+  const props: Node[] = obj.properties
+  const ms = new MagicString(source)
+  const multiline = source.slice(obj.start, obj.end).includes("\n")
+  const indent = props.length ? indentAt(source, props[0].start) : indentAt(source, obj.start) + "  "
+  const removed = new Set<number>()
+  const added: [string, unknown][] = []
+  for (const [k, x] of Object.entries(values)) {
+    const i = props.findIndex((p) => keyName(p) === k)
+    if (i === -1) { if (x !== undefined) added.push([k, x]); continue }
+    if (x === undefined) { removed.add(i); continue }
+    if (!isLiteral(props[i].value)) throw new PatchError(`theme.${k} is computed in code. Edit it in the code view.`)
+    ms.overwrite(props[i].value.start, props[i].value.end, valueToCode(x, indent))
+  }
+  const kept = props.filter((_, i) => !removed.has(i))
+  const finalKeys = [...kept.map(keyName), ...added.map(([k]) => k)]
+  const baseProp = kept.find((p) => keyName(p) === "base")
+  const baseValue = values.base ?? (baseProp && baseProp.value.type === "StringLiteral" ? baseProp.value.value : undefined)
+  if (finalKeys.length === 1 && finalKeys[0] === "base" && typeof baseValue === "string" && v?.type === "ObjectExpression") {
+    return setProps(source, deckSrc, { theme: baseValue })
+  }
+  if (!kept.length) {
+    ms.overwrite(obj.start, obj.end, valueToCode(Object.fromEntries(added), indentAt(source, obj.start)))
+    return { source: ms.toString() }
+  }
+  // Remove runs of properties together, so their commas go with them.
+  for (let i = 0; i < props.length; i++) {
+    if (!removed.has(i)) continue
+    let j = i
+    while (removed.has(j + 1)) j++
+    if (j < props.length - 1) ms.remove(props[i].start, props[j + 1].start)
+    else ms.remove(props[i - 1].end, props[j].end)
+    i = j
+  }
+  if (added.length) {
+    let at = obj.end - 1
+    while (/\s/.test(source[at - 1])) at--
+    const trailingComma = source[at - 1] === ","
+    const code = added.map(([k, x]) => `${IDENT.test(k) ? k : JSON.stringify(k)}: ${valueToCode(x, indent)}`)
+    const text = multiline
+      ? (trailingComma ? "" : ",") + code.map((c) => `\n${indent}${c}`).join(",") + (trailingComma ? "," : "")
+      : (trailingComma ? " " : ", ") + code.join(", ") + (trailingComma ? "," : "")
+    ms.appendRight(at, text)
+  }
+  return { source: multiline ? ms.toString() : wrapLongObject(ms.toString(), obj.start) }
+}
+
+/** Break an inline object literal that grew too long into one property per line. */
+function wrapLongObject(source: string, start: number): string {
+  let obj: Node | undefined
+  walk(parseSource(source), (n) => {
+    if (obj || n.end < start || n.start > start) return false
+    if (n.type === "ObjectExpression" && n.start === start) { obj = n; return false }
+  })
+  if (!obj || obj.end - obj.start <= 80 || source.slice(obj.start, obj.end).includes("\n")) return source
+  const indent = indentAt(source, start)
+  const props = (obj.properties as Node[]).map((p) => `${indent}  ${source.slice(p.start, p.end)},`)
+  return source.slice(0, obj.start) + `{\n${props.join("\n")}\n${indent}}` + source.slice(obj.end)
+}
+
 // --- element text -----------------------------------------------------------------
 
 /** Replace the text content of a text-bearing element. */

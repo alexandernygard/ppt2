@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { compile } from "./compile"
-import { setProps, setText, moveSlide, insertSlide, removeSlide, duplicateSlide, insertElement, removeElement, applyEdits, PatchError, elementCode, replaceSlide } from "./patch"
+import { setProps, setThemeProps, setText, moveSlide, insertSlide, removeSlide, duplicateSlide, insertElement, removeElement, applyEdits, PatchError, elementCode, replaceSlide } from "./patch"
 import { STARTER_DECK } from "./starter"
 import { lintDeck, outline, assetRefs } from "./outline"
 
@@ -232,6 +232,144 @@ export default (
 
     it("lists referenced assets", () => {
       expect(assetRefs(compile(DIA).deck!).sort()).toEqual(["bg.png", "team.jpg"])
+    })
+  })
+})
+
+describe("brand kit", () => {
+  const BRAND = `import { Deck, Slide, Title, Shape, Image } from "ppt2"
+
+// Acme's company template
+const brand = {
+  base: "paper",
+  colors: { accent: "#0a7cff" },
+  fonts: { heading: "assets/Acme-Sans_Bold.woff2", body: [{ src: "assets/acme.woff2", family: "Acme", weight: 400 }, { src: "assets/acme-b.woff2", family: "Acme", weight: 700 }] },
+  logo: { src: "assets/logo.svg", position: "bottom-left", inverse: "assets/logo-white.svg" },
+  footer: "Acme · {n}/{total}",
+  slideNumbers: true,
+  master: <><Shape kind="rect" fill="accent" x={0} y={0} w={16} h={1080} /></>,
+  layouts: {
+    cover: { base: "title", variant: "inverse", master: false, elements: <Image src="assets/hero.jpg" x={1100} y={0} w={820} h={1080} /> },
+  },
+}
+
+export default (
+  <Deck title="Acme" theme={brand}>
+    <Slide layout="cover" variant="accent">
+      <Title>Hello</Title>
+    </Slide>
+    <Slide>
+      <Title>Plain</Title>
+    </Slide>
+    <Slide master={false}>
+      <Title>No chrome</Title>
+    </Slide>
+  </Deck>
+)
+`
+
+  it("resolves logo, footer, numbers, font files, master and layouts", () => {
+    const r = compile(BRAND)
+    expect(r.warnings).toEqual([])
+    const t = r.deck!.theme
+    expect(t.colors.accent).toBe("#0a7cff")
+    expect(t.colors.background).toBe("#f6f1e7") // from paper
+    expect(t.logo).toEqual({ src: "assets/logo.svg", position: "bottom-left", height: 56, inverse: "assets/logo-white.svg" })
+    expect(t.footer).toBe("Acme · {n}/{total}")
+    expect(t.slideNumbers).toBe(true)
+    expect(t.fonts.heading).toMatch(/^'Acme Sans Bold', 'Fraunces'/)
+    expect(t.fonts.body).toMatch(/^'Acme', /)
+    expect(t.fontFaces).toEqual([
+      { family: "Acme Sans Bold", src: "assets/Acme-Sans_Bold.woff2", weight: "100 900", style: "normal" },
+      { family: "Acme", src: "assets/acme.woff2", weight: "400", style: "normal" },
+      { family: "Acme", src: "assets/acme-b.woff2", weight: "700", style: "normal" },
+    ])
+    expect(t.master).toHaveLength(1)
+    expect(t.master![0]).toMatchObject({ type: "shape", path: "m/0", props: { fill: "accent", w: 16 } })
+    expect(t.layouts!.cover).toMatchObject({ base: "title", props: { variant: "inverse", master: false } })
+    expect(t.layouts!.cover.elements[0]).toMatchObject({ type: "image", path: "l:cover/0" })
+  })
+
+  it("applies theme layouts and the master opt-out to slides", () => {
+    const d = compile(BRAND).deck!
+    expect(d.slides[0]).toMatchObject({ layout: "title", themeLayout: "cover", props: { variant: "accent", master: false } })
+    expect(d.slides[1].themeLayout).toBeUndefined()
+    expect(d.slides[2].props.master).toBe(false)
+    expect(outline(d)).toContain("Slide 1 [cover]")
+    expect(outline(d)).toContain("brand: logo, footer, slide numbers, font files, 1 master elements, layouts cover")
+  })
+
+  it("lists brand assets with the deck's files", () => {
+    expect(assetRefs(compile(BRAND).deck!).sort()).toEqual(["Acme-Sans_Bold.woff2", "acme-b.woff2", "acme.woff2", "hero.jpg", "logo-white.svg", "logo.svg"])
+  })
+
+  it("warns about unknown layouts, including theme ones in the hint", () => {
+    const r = compile(BRAND.replace(`<Slide master={false}>`, `<Slide layout="nope">`))
+    expect(r.warnings[0].message).toMatch(/Unknown layout "nope". Layouts: cover, title/)
+    const bad = compile(`export default <Deck theme={{ base: "nah", logo: { src: "x.png", position: "middle" }, layouts: { a: { base: "zz" } } }}><Slide layout="a" /></Deck>`)
+    expect(bad.warnings.map((w) => w.message)).toEqual([
+      expect.stringMatching(/Unknown base theme "nah"/),
+      expect.stringMatching(/Unknown logo position "middle"/),
+      expect.stringMatching(/Theme layout "a": unknown base layout "zz"/),
+    ])
+    expect(bad.deck!.slides[0].layout).toBe("content")
+  })
+
+  describe("setThemeProps", () => {
+    const deckOf = (src: string) => must(src).src!
+    const one = (theme: string) => `export default <Deck title="x" ${theme}><Slide /></Deck>`
+
+    it("turns a theme name into an object and back", () => {
+      let src = one(`theme="midnight"`)
+      src = setThemeProps(src, deckOf(src), { footer: "Acme", slideNumbers: true }).source
+      expect(src).toBe(one(`theme={{ base: "midnight", footer: "Acme", slideNumbers: true }}`))
+      expect(must(src).theme).toMatchObject({ name: "midnight+custom", footer: "Acme", slideNumbers: true })
+      src = setThemeProps(src, deckOf(src), { footer: undefined, slideNumbers: undefined }).source
+      expect(src).toBe(one(`theme="midnight"`))
+    })
+
+    it("adds a theme where there is none", () => {
+      const src = one(``).replace(` >`, `>`)
+      expect(setThemeProps(src, deckOf(src), { logo: "assets/logo.png" }).source).toContain(`<Deck title="x" theme={{ base: "snow", logo: "assets/logo.png" }}>`)
+    })
+
+    it("edits keys of a const theme in place, keeping comments and JSX", () => {
+      const d = must(BRAND)
+      let src = setThemeProps(BRAND, d.src!, { footer: "New footer", slideNumbers: undefined, logo: { src: "assets/logo.svg", position: "top-right" } }).source
+      expect(src).toContain(`  footer: "New footer",\n  master: <>`)
+      expect(src).not.toContain("slideNumbers")
+      expect(src).toContain(`  logo: { src: "assets/logo.svg", position: "top-right" },`)
+      expect(src).toContain("// Acme's company template")
+      src = setThemeProps(src, must(src).src!, { base: "midnight", backdrop: "glow" }).source
+      expect(src).toContain(`  base: "midnight",`)
+      expect(src).toMatch(/  },\n  backdrop: "glow",\n}/)
+      const t = must(src).theme
+      expect(t).toMatchObject({ footer: "New footer", backdrop: "glow", logo: { position: "top-right" } })
+      expect(t.slideNumbers).toBeUndefined()
+      expect(t.master).toHaveLength(1)
+    })
+
+    it("removes the last key of an inline object without leaving a comma", () => {
+      let src = one(`theme={{ base: "snow", footer: "a", logo: "b" }}`)
+      src = setThemeProps(src, deckOf(src), { logo: undefined }).source
+      expect(src).toBe(one(`theme={{ base: "snow", footer: "a" }}`))
+      src = setThemeProps(src, deckOf(src), { base: undefined, footer: undefined, slideNumbers: true }).source
+      expect(src).toBe(one(`theme={{ slideNumbers: true }}`))
+    })
+
+    it("breaks a long inline theme onto separate lines", () => {
+      let src = `export default (\n  <Deck theme={{ base: "midnight", footer: "Acme" }}>\n    <Slide />\n  </Deck>\n)`
+      src = setThemeProps(src, must(src).src!, { logo: { src: "assets/acme-logo.svg", inverse: "assets/acme-logo-white.svg" } }).source
+      expect(src).toContain(`<Deck theme={{\n    base: "midnight",\n    footer: "Acme",\n    logo: { src: "assets/acme-logo.svg", inverse: "assets/acme-logo-white.svg" },\n  }}>`)
+      src = setThemeProps(src, must(src).src!, { slideNumbers: true }).source
+      expect(src).toContain(`inverse: "assets/acme-logo-white.svg" },\n    slideNumbers: true,\n  }}>`)
+    })
+
+    it("refuses to overwrite computed theme values", () => {
+      const src = one(`theme={{ footer: "a" + "b" }}`)
+      expect(() => setThemeProps(src, deckOf(src), { footer: "c" })).toThrow(PatchError)
+      const fn = one(`theme={makeTheme()}`).replace("export", "const makeTheme = () => \"snow\"\nexport")
+      expect(() => setThemeProps(fn, deckOf(fn), { footer: "c" })).toThrow(PatchError)
     })
   })
 })
