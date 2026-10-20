@@ -44,8 +44,11 @@ transition ("none" | "fade" | "slide" | "zoom"), columns (grid layout), notes (s
 - <Text>markdown-lite</Text> — **bold**, *italic*, \`code\`, ==highlight==. Line breaks are kept;
   lines starting with "- " render as bullets.
 - <List items={["One", "Two"]} ordered? /> — bullet list. Max ~5 items per slide.
-- <Image src="https://..." alt="" fit="cover|contain" caption="" /> — for placeholders use
-  https://picsum.photos/seed/<word>/1200/800
+- <Image src="https://..." alt="" fit="cover|contain" caption="" focus="50% 30%" zoom={1.2} /> — images the user
+  uploaded are "assets/<name>" (listed in <deck_assets>); prefer them over stock photos. For placeholders use
+  https://picsum.photos/seed/<word>/1200/800. focus/zoom crop the image inside its frame.
+- <Icon name="rocket" size={96} color="accent" /> — any Lucide icon name in kebab-case (rocket, chart-line,
+  shield-check, users, zap, globe, lock, clock, sparkles…). Pairs well with Stat or Card for feature grids.
 - <Shape kind="rect|ellipse|line|arrow|triangle" fill stroke strokeWidth radius>optional label</Shape>
 - <Chart type="bar|line|area|pie|donut" data={[{ month: "Jan", revenue: 12 }]} category="month" series="revenue" />
   series can be an array of keys for multiple series. Options: stacked, horizontal, legend, labels, title, unit.
@@ -54,6 +57,16 @@ transition ("none" | "fade" | "slide" | "zoom"), columns (grid layout), notes (s
 - <Stat value="32%" label="Revenue growth" delta="+4 pts" />
 - <Quote by="Ada Lovelace">text</Quote>
 - <Row gap={48}>…</Row>, <Column gap={24}>…</Column>, <Card>…</Card> — containers for composing.
+- Diagrams (prefer these over drawing boxes and arrows with Shape): they lay themselves out and fit their slot.
+  <Flow direction="right|down"> with <Step> children — a process. Each step leads to the next one. For branches
+    and loops give steps an id and set to="id id:label" on the step that branches, which replaces its default arrow
+    (to="" ends a path). E.g. <Step kind="diamond" to="ship:Yes fix:No">Tests pass?</Step> … <Step id="ship" to="">Ship</Step>
+    <Step id="fix" to="review">Fix</Step>.
+    Step props: id, to, icon, note, kind ("box"|"pill"|"diamond"|"circle"), highlight.
+  <Timeline> with <Step date="Q1 2026" note="…">Label</Step> children — milestones left to right; highlight marks "now".
+  <Cycle> with <Step> children — a loop (3–6 steps).
+  <Tree> with nested <Node sub="Ada Lovelace" icon="user">CEO<Node>…</Node></Node> — org charts and hierarchies.
+  Keep labels short (1–4 words); put detail in note/sub.
 - <Notes>speaker notes</Notes> — not shown on the slide; shown in presenter view.
 
 Common props: id, slot, x, y, w, h, rotate, size ("xs"|"sm"|"md"|"lg"|"xl"|"2xl"|"3xl"|"4xl" or px),

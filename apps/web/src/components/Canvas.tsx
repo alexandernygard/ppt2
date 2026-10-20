@@ -1,9 +1,11 @@
-import { useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Select,
   SelectContent,
@@ -15,7 +17,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@alexandernygard/components"
-import { CopyIcon, ImageIcon, PlusIcon, ShapesIcon, Trash2Icon, TypeIcon, UndoDotIcon, BarChart3Icon, ListIcon, HashIcon, QuoteIcon, CodeIcon, HeadingIcon } from "lucide-react"
+import { CopyIcon, ImageIcon, PlusIcon, ShapesIcon, Trash2Icon, TypeIcon, UndoDotIcon, BarChart3Icon, ListIcon, HashIcon, QuoteIcon, CodeIcon, HeadingIcon, CropIcon, UploadIcon, SmileIcon, WorkflowIcon, MilestoneIcon, NetworkIcon, RefreshCwIcon, ReplaceIcon } from "lucide-react"
+import { IconPicker } from "./IconPicker"
 import { EditableSlide, Stage, findElement } from "@ppt2/react"
 import { layouts } from "@ppt2/sdk"
 import { useStore, useVisibleDeck } from "../store"
@@ -26,7 +29,25 @@ export function Canvas() {
   const selected = useStore((s) => s.selected)
   const aiBusy = useStore((s) => s.aiPreview != null)
   const st = useStore.getState
+  const cropping = useStore((s) => s.cropping)
   const slide = deck?.slides[current]
+  const upload = useRef<HTMLInputElement>(null)
+  const replaceTarget = useRef<string | null>(null)
+  const [iconPicker, setIconPicker] = useState<"insert" | "replace" | null>(null)
+
+  // Paste images from the clipboard onto the current slide.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement
+      if (t.closest?.(".cm-editor, input, textarea, [contenteditable=true], [role=dialog]")) return
+      const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"))
+      if (!files.length || st().aiPreview) return
+      e.preventDefault()
+      void st().insertImages(files)
+    }
+    window.addEventListener("paste", onPaste)
+    return () => window.removeEventListener("paste", onPaste)
+  }, [st])
 
   // Canvas keyboard: delete, nudge, duplicate, slide navigation.
   useEffect(() => {
@@ -38,7 +59,7 @@ export function Canvas() {
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? s.redo() : s.undo(); return }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); s.redo(); return }
       if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); s.selected ? s.duplicateSelected() : s.duplicateSlide(s.current); return }
-      if (e.key === "Escape") s.select(null)
+      if (e.key === "Escape" || (e.key === "Enter" && s.cropping)) { if (s.cropping) s.setCropping(null); else s.select(null); return }
       if ((e.key === "Delete" || e.key === "Backspace") && s.selected) { e.preventDefault(); s.deleteElement(s.selected); return }
       if (e.key.startsWith("Arrow")) {
         const sl = s.deck?.slides[s.current]
@@ -90,7 +111,20 @@ export function Canvas() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" disabled={aiBusy}><PlusIcon /> Insert</Button></DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            {([["title", "Title", HeadingIcon], ["text", "Text", TypeIcon], ["list", "Bullets", ListIcon], ["image", "Image", ImageIcon], ["shape", "Shape", ShapesIcon], ["chart", "Chart", BarChart3Icon], ["stat", "Big number", HashIcon], ["quote", "Quote", QuoteIcon], ["code", "Code", CodeIcon]] as const).map(([t, label, Icon]) => (
+            {([["title", "Title", HeadingIcon], ["text", "Text", TypeIcon], ["list", "Bullets", ListIcon], ["stat", "Big number", HashIcon], ["quote", "Quote", QuoteIcon]] as const).map(([t, label, Icon]) => (
+              <DropdownMenuItem key={t} onSelect={() => st().addElement(t)}><Icon /> {label}</DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => { replaceTarget.current = null; upload.current?.click() }}><UploadIcon /> Image from computer…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => st().addElement("image")}><ImageIcon /> Placeholder image</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setIconPicker("insert")}><SmileIcon /> Icon…</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs">Diagrams</DropdownMenuLabel>
+            {([["flow", "Process flow", WorkflowIcon], ["timeline", "Timeline", MilestoneIcon], ["tree", "Org chart", NetworkIcon], ["cycle", "Cycle", RefreshCwIcon]] as const).map(([t, label, Icon]) => (
+              <DropdownMenuItem key={t} onSelect={() => st().addElement(t)}><Icon /> {label}</DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            {([["chart", "Chart", BarChart3Icon], ["shape", "Shape", ShapesIcon], ["code", "Code", CodeIcon]] as const).map(([t, label, Icon]) => (
               <DropdownMenuItem key={t} onSelect={() => st().addElement(t)}><Icon /> {label}</DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -99,6 +133,24 @@ export function Canvas() {
           <>
             <Separator orientation="vertical" className="mx-1 h-5!" />
             <span className="text-xs text-muted-foreground">{el.type}{pinned ? " · pinned" : " · in layout"}</span>
+            {el.type === "image" && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild><Button size="icon-sm" variant={cropping === el.path ? "secondary" : "ghost"} onClick={() => st().setCropping(cropping === el.path ? null : el.path)}><CropIcon /></Button></TooltipTrigger>
+                  <TooltipContent>Crop: drag to reposition, scroll to zoom (or double-click the image)</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" onClick={() => { replaceTarget.current = el.path; upload.current?.click() }}><ReplaceIcon /></Button></TooltipTrigger>
+                  <TooltipContent>Replace image (or drop a file onto it)</TooltipContent>
+                </Tooltip>
+              </>
+            )}
+            {el.type === "icon" && (
+              <Tooltip>
+                <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" onClick={() => setIconPicker("replace")}><ReplaceIcon /></Button></TooltipTrigger>
+                <TooltipContent>Change icon</TooltipContent>
+              </Tooltip>
+            )}
             {pinned && (
               <Tooltip>
                 <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" onClick={() => st().setElementProps(el.path, { x: undefined, y: undefined, w: undefined, h: undefined })}><UndoDotIcon /></Button></TooltipTrigger>
@@ -134,10 +186,28 @@ export function Canvas() {
               onSelect={(p) => st().select(p)}
               onChangeBox={(p, box) => st().setElementBox(p, box)}
               onChangeText={(p, f, v) => st().setElementText(p, f, v)}
+              onChangeProps={(p, props) => st().setElementProps(p, props)}
+              cropping={cropping}
+              onCrop={(p) => st().setCropping(p)}
+              onDropFiles={(files, at) => void st().insertImages(files, at)}
             />
           </div>
         </Stage>
       </div>
+      <input ref={upload} type="file" accept="image/*" multiple hidden onChange={(e) => {
+        const files = [...(e.target.files ?? [])]
+        const path = replaceTarget.current
+        if (files.length) void st().insertImages(files, path ? { x: 0, y: 0, path } : undefined)
+        e.target.value = ""
+      }} />
+      <IconPicker
+        open={iconPicker != null}
+        onOpenChange={(o) => !o && setIconPicker(null)}
+        onPick={(name) => {
+          if (iconPicker === "replace" && el?.type === "icon") st().setElementProps(el.path, { name })
+          else st().addElement("icon", { name })
+        }}
+      />
     </div>
   )
 }

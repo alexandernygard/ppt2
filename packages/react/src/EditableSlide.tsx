@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, typ
 import type { DeckModel, ElementNode, SlideNode } from "@ppt2/sdk"
 import { SlideView } from "./SlideView"
 import { useStage } from "./Stage"
-import type { Box } from "./elements"
+import type { Box, Override } from "./elements"
 
 type Rect = { x: number; y: number; w: number; h: number }
 type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw"
@@ -18,10 +18,17 @@ export interface EditableSlideProps {
   onChangeBox: (path: string, box: Box) => void
   /** Commit inline text. */
   onChangeText: (path: string, field: TextField, value: string) => void
+  /** Commit other prop changes (image crop). */
+  onChangeProps?: (path: string, props: Record<string, unknown>) => void
+  /** Image being cropped: drag pans, wheel zooms. */
+  cropping?: string | null
+  onCrop?: (path: string | null) => void
+  /** Files dropped on the slide; `path` is the image under the pointer, if any. */
+  onDropFiles?: (files: File[], at: { x: number; y: number; path?: string }) => void
 }
 
 const TEXTISH = new Set(["title", "subtitle", "text", "list", "quote", "stat", "code"])
-const EDITABLE: Record<string, TextField> = { title: "text", subtitle: "text", text: "text", quote: "text", shape: "text", code: "text", notes: "text", list: "items", stat: "value" }
+const EDITABLE: Record<string, TextField> = { title: "text", subtitle: "text", text: "text", quote: "text", shape: "text", code: "text", notes: "text", list: "items", stat: "value", step: "text", node: "text" }
 const SINGLE_LINE = new Set(["title", "subtitle", "stat"])
 
 export function findElement(els: ElementNode[], path: string): ElementNode | undefined {
@@ -33,11 +40,20 @@ export function findElement(els: ElementNode[], path: string): ElementNode | und
 
 const topLevel = (path: string) => path.split("/").slice(0, 2).join("/")
 
-export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, onChangeText }: EditableSlideProps) {
+const parseFocus = (f: unknown): [number, number] => {
+  const m = typeof f === "string" ? /([\d.]+)%\s+([\d.]+)%/.exec(f) : null
+  return m ? [+m[1], +m[2]] : [50, 50]
+}
+
+export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, onChangeText, onChangeProps, cropping, onCrop, onDropFiles }: EditableSlideProps) {
   const { scale } = useStage()
   const root = useRef<HTMLDivElement>(null)
   const [rects, setRects] = useState<Record<string, Rect>>({})
-  const [override, setOverride] = useState<Record<string, Box> | undefined>()
+  const [override, setOverride] = useState<Record<string, Override> | undefined>()
+  const crop = useRef<{ path: string; px: number; py: number; focus: [number, number]; zoom: number; moved: boolean } | null>(null)
+  const cropLive = useRef<{ focus: [number, number]; zoom: number } | null>(null)
+  const wheelTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const [dropAt, setDropAt] = useState<string | null>(null)
   const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] })
   const [editing, setEditing] = useState<{ path: string; field: TextField; value: string; rect: Rect; style: CSSProperties } | null>(null)
   const [hover, setHover] = useState<string | null>(null)
@@ -120,8 +136,60 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
     gesture.current = { kind, path, handle, px: p.x, py: p.y, start, moved: false, el, flow: el.props.x == null && el.props.y == null, pointerId: e.pointerId }
   }
 
+  // --- crop: pan with drag, zoom with wheel ---------------------------------
+  const cropEl = cropping ? findElement(slide.elements, cropping) : undefined
+  const cropState = () => cropLive.current ?? { focus: parseFocus(cropEl?.props.focus), zoom: typeof cropEl?.props.zoom === "number" ? (cropEl.props.zoom as number) : 1 }
+  const cropProps = (c: { focus: [number, number]; zoom: number }) => ({
+    focus: Math.round(c.focus[0]) === 50 && Math.round(c.focus[1]) === 50 ? undefined : `${Math.round(c.focus[0])}% ${Math.round(c.focus[1])}%`,
+    zoom: Math.abs(c.zoom - 1) < 0.01 ? undefined : Math.round(c.zoom * 100) / 100,
+  })
+  const showCrop = (c: { focus: [number, number]; zoom: number }) => {
+    cropLive.current = c
+    setOverride({ [cropping!]: { focus: `${c.focus[0]}% ${c.focus[1]}%`, zoom: c.zoom } })
+  }
+  const commitCrop = () => {
+    if (cropping && cropLive.current) onChangeProps?.(cropping, cropProps(cropLive.current))
+    cropLive.current = null
+    setTimeout(() => setOverride(undefined), 0)
+  }
+  function cropDown(e: RPointerEvent) {
+    const chain = pathsAt(e.target)
+    if (!chain.includes(cropping!)) { commitCrop(); onCrop?.(null); return false }
+    const p = toStage(e)
+    crop.current = { path: cropping!, px: p.x, py: p.y, ...cropState(), moved: false }
+    root.current!.setPointerCapture(e.pointerId)
+    return true
+  }
+  function cropMove(e: RPointerEvent) {
+    const c = crop.current!
+    const node = root.current?.querySelector(`[data-path="${c.path}"]`)
+    const img = node?.querySelector("img")
+    const frame = node?.querySelector("[data-frame]") as HTMLElement | null
+    if (!img || !frame || !img.naturalWidth) return
+    const p = toStage(e)
+    const s = root.current!.getBoundingClientRect().width / deck.width
+    const fw = frame.getBoundingClientRect().width / s, fh = frame.getBoundingClientRect().height / s
+    const k = Math.max(fw / img.naturalWidth, fh / img.naturalHeight) * c.zoom
+    const ox = img.naturalWidth * k - fw, oy = img.naturalHeight * k - fh
+    const clamp = (v: number) => Math.max(0, Math.min(100, v))
+    const fx = ox > 1 ? clamp(c.focus[0] - ((p.x - c.px) / ox) * 100) : c.focus[0]
+    const fy = oy > 1 ? clamp(c.focus[1] - ((p.y - c.py) / oy) * 100) : c.focus[1]
+    c.moved = true
+    showCrop({ focus: [fx, fy], zoom: c.zoom })
+  }
+  function onWheel(e: React.WheelEvent) {
+    if (!cropping) return
+    if (!pathsAt(e.target).includes(cropping)) return
+    e.stopPropagation()
+    const c = cropState()
+    showCrop({ focus: c.focus, zoom: Math.max(1, Math.min(4, c.zoom * Math.exp(-e.deltaY * 0.002))) })
+    clearTimeout(wheelTimer.current)
+    wheelTimer.current = setTimeout(commitCrop, 350)
+  }
+
   function onPointerDown(e: RPointerEvent) {
     if (e.button !== 0 || editing) return
+    if (cropping && cropDown(e)) return
     const chain = pathsAt(e.target)
     if (!chain.length) { onSelect(null); return }
     const top = topLevel(chain[chain.length - 1])
@@ -131,6 +199,7 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
   }
 
   function onPointerMove(e: RPointerEvent) {
+    if (crop.current) { cropMove(e); return }
     const g = gesture.current
     if (!g) {
       const chain = pathsAt(e.target)
@@ -166,6 +235,7 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
   }
 
   function onPointerUp() {
+    if (crop.current) { const moved = crop.current.moved; crop.current = null; if (moved) commitCrop(); return }
     const g = gesture.current
     gesture.current = null
     setGuides({ x: [], y: [] })
@@ -177,6 +247,8 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
   function onDoubleClick(e: React.MouseEvent) {
     if (editing) return
     const chain = pathsAt(document.elementFromPoint(e.clientX, e.clientY))
+    const image = [...chain].reverse().find((p) => findElement(slide.elements, p)?.type === "image")
+    if (image && onCrop) { onSelect(image); onCrop(image); return }
     const path = [...chain].reverse().find((p) => { const el = findElement(slide.elements, p); return el && EDITABLE[el.type] })
     if (!path) return
     const el = findElement(slide.elements, path)!
@@ -208,8 +280,22 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
   const selEl = selected ? findElement(slide.elements, selected) : undefined
   const canResize = !!selEl && selected === topLevel(selected!)
 
+  const fileDrag = (e: React.DragEvent) => [...e.dataTransfer.types].includes("Files")
+  const imageAt = (e: { clientX: number; clientY: number }) => [...pathsAt(document.elementFromPoint(e.clientX, e.clientY))].reverse().find((p) => findElement(slide.elements, p)?.type === "image")
+  const crp = cropping ? rects[cropping] ?? measure(cropping) : undefined
+
   return (
     <div
+      onDragOver={(e) => { if (!onDropFiles || !fileDrag(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; const p = imageAt(e) ?? "slide"; if (p !== dropAt) setDropAt(p) }}
+      onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDropAt(null) }}
+      onDrop={(e) => {
+        setDropAt(null)
+        if (!onDropFiles || !fileDrag(e)) return
+        e.preventDefault()
+        const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"))
+        if (files.length) onDropFiles(files, { ...toStage(e), path: imageAt(e) })
+      }}
+      onWheel={onWheel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -225,10 +311,18 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
       mode="edit"
       overrides={override}
       hidden={editing ? new Set([editing.path]) : undefined}
-      style={{ cursor: gesture.current?.moved ? "grabbing" : "default", touchAction: "none" }}
+      style={{ cursor: crop.current ? "grabbing" : cropping ? "move" : gesture.current?.moved ? "grabbing" : "default", touchAction: "none" }}
     >
       {hov && !gesture.current && <div style={{ position: "absolute", left: hov.x, top: hov.y, width: hov.w, height: hov.h, outline: `${line}px dashed rgba(242,169,34,.7)`, pointerEvents: "none", zIndex: 20 }} />}
-      {sel && !editing && (
+      {dropAt && (() => { const r = dropAt === "slide" ? { x: 0, y: 0, w: deck.width, h: deck.height } : measure(dropAt); return r ? <div style={{ position: "absolute", left: r.x, top: r.y, width: r.w, height: r.h, outline: `${line * 2}px dashed #f2a922`, outlineOffset: -line * 2, background: "rgba(242,169,34,.12)", pointerEvents: "none", zIndex: 25 }} /> : null })()}
+      {crp && (
+        <div style={{ position: "absolute", left: crp.x, top: crp.y, width: crp.w, height: crp.h, outline: `${line}px dashed #f2a922`, boxShadow: "0 0 0 100000px rgba(0,0,0,.45)", pointerEvents: "none", zIndex: 24, cursor: "move" }}>
+          <div style={{ position: "absolute", top: -34 / scale, left: 0, fontSize: 12 / scale, color: "#18212b", background: "#f2a922", padding: `${2 / scale}px ${6 / scale}px`, borderRadius: 4 / scale, whiteSpace: "nowrap", fontFamily: "system-ui" }}>
+            Crop · drag to reposition · scroll to zoom · Esc to finish
+          </div>
+        </div>
+      )}
+      {sel && !editing && !cropping && (
         <div style={{ position: "absolute", left: sel.x, top: sel.y, width: sel.w, height: sel.h, outline: `${line}px solid #f2a922`, pointerEvents: "none", zIndex: 21 }}>
           {canResize && (["nw", "n", "ne", "e", "se", "s", "sw", "w"] as Handle[]).map((hd) => (
             <div

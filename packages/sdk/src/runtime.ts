@@ -68,7 +68,33 @@ export interface SlideProps {
   notes?: string
 }
 export interface ListProps extends BaseProps { items: string[]; ordered?: boolean }
-export interface ImageProps extends BaseProps { src: string; alt?: string; fit?: "cover" | "contain"; caption?: string }
+export interface ImageProps extends BaseProps {
+  /** A URL, or "assets/<name>" for an image stored with the deck. */
+  src: string
+  alt?: string
+  fit?: "cover" | "contain"
+  caption?: string
+  /** Crop: the point of the image to keep in frame, as "x% y%" (default "50% 50%"). */
+  focus?: string
+  /** Crop: zoom into the image, 1 = fill the frame. */
+  zoom?: number
+}
+export interface IconProps extends BaseProps { name: string; strokeWidth?: number }
+export interface DiagramProps extends BaseProps { direction?: "right" | "down" }
+export interface StepProps {
+  /** Name other steps can point at with `to`. */
+  id?: string
+  /** Flow: where this step leads, as space-separated ids. "id:label" labels the arrow. */
+  to?: string
+  icon?: string
+  note?: string
+  /** Timeline: the date or period shown above the step. */
+  date?: string
+  /** Flow: node shape. */
+  kind?: "box" | "pill" | "diamond" | "circle"
+  highlight?: boolean
+}
+export interface NodeProps { sub?: string; icon?: string; highlight?: boolean }
 export interface ShapeProps extends BaseProps {
   kind?: "rect" | "ellipse" | "line" | "arrow" | "triangle"
   fill?: string
@@ -111,12 +137,20 @@ export const Quote = tag<QuoteProps>("quote")
 export const Row = tag<StackProps>("row")
 export const Column = tag<StackProps>("column")
 export const Card = tag<StackProps>("card")
+export const Icon = tag<IconProps>("icon")
+export const Flow = tag<DiagramProps>("flow")
+export const Tree = tag<DiagramProps>("tree")
+export const Timeline = tag<DiagramProps>("timeline")
+export const Cycle = tag<DiagramProps>("cycle")
+export const Step = tag<StepProps>("step")
+export const Node = tag<NodeProps>("node")
 
 /** Tag name in source for each element type. */
 export const TAGS: Record<string, string> = {
   deck: "Deck", slide: "Slide", notes: "Notes", title: "Title", subtitle: "Subtitle", text: "Text",
   list: "List", image: "Image", shape: "Shape", chart: "Chart", table: "Table", code: "Code",
-  stat: "Stat", quote: "Quote", row: "Row", column: "Column", card: "Card",
+  stat: "Stat", quote: "Quote", row: "Row", column: "Column", card: "Card", icon: "Icon",
+  flow: "Flow", tree: "Tree", timeline: "Timeline", cycle: "Cycle", step: "Step", node: "Node",
 }
 
 /** Parse CSV text into rows of objects. Numeric cells become numbers. */

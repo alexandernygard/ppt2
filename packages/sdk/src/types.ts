@@ -19,6 +19,13 @@ export type ElementType =
   | "row"
   | "column"
   | "card"
+  | "icon"
+  | "flow"
+  | "tree"
+  | "timeline"
+  | "cycle"
+  | "step"
+  | "node"
 
 export type LayoutName =
   | "title"

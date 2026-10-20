@@ -18,6 +18,50 @@ const hex = (css: string, fallback = "000000") => toHex(css)?.hex ?? fallback
 const plain = (s: string) => s.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/==([^=]+)==/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
 const family = (ff: string) => ff.split(",")[0].replace(/["']/g, "").trim()
 
+/** Serialize a rendered <svg> to a data URL with CSS variables and currentColor resolved. */
+function svgDataUrl(svg: SVGSVGElement, w: number, h: number): string {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  const src = [svg, ...svg.querySelectorAll("*")]
+  const dst = [clone, ...clone.querySelectorAll("*")]
+  src.forEach((n, i) => {
+    const cs = getComputedStyle(n)
+    const d = dst[i] as SVGElement
+    for (const prop of ["fill", "stroke", "stroke-width", "opacity", "font-size", "font-family"]) {
+      const v = cs.getPropertyValue(prop)
+      if (v && v !== "none" || prop === "fill" || prop === "stroke") d.setAttribute(prop, v || "none")
+    }
+  })
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg")
+  clone.setAttribute("width", String(w))
+  clone.setAttribute("height", String(h))
+  if (!clone.getAttribute("viewBox")) clone.setAttribute("viewBox", `0 0 ${svg.width.baseVal.value || w} ${svg.height.baseVal.value || h}`)
+  clone.removeAttribute("style")
+  return "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(new XMLSerializer().serializeToString(clone))))
+}
+
+/** Draw an image as it appears in its frame (fit, focus, zoom), so crops survive export exactly. */
+function croppedImage(img: HTMLImageElement, frame: HTMLElement, p: Record<string, unknown>): string | undefined {
+  try {
+    const fw = frame.offsetWidth, fh = frame.offsetHeight
+    const nw = img.naturalWidth, nh = img.naturalHeight
+    if (!fw || !fh || !nw) return
+    const px = Math.min(2, 2400 / Math.max(fw, fh))
+    const c = document.createElement("canvas")
+    c.width = Math.round(fw * px); c.height = Math.round(fh * px)
+    const ctx = c.getContext("2d")!
+    const m = typeof p.focus === "string" ? /([\d.]+)%\s+([\d.]+)%/.exec(p.focus) : null
+    const fx = m ? +m[1] / 100 : 0.5, fy = m ? +m[2] / 100 : 0.5
+    const z = typeof p.zoom === "number" ? p.zoom : 1
+    const k = (p.fit === "contain" ? Math.min(fw / nw, fh / nh) : Math.max(fw / nw, fh / nh))
+    const dw = nw * k, dh = nh * k
+    const dx = (fw - dw) * fx, dy = (fh - dh) * fy
+    const ox = fw * fx, oy = fh * fy
+    ctx.scale(px, px)
+    ctx.drawImage(img, ox + z * (dx - ox), oy + z * (dy - oy), dw * z, dh * z)
+    return c.toDataURL(p.fit === "contain" ? "image/png" : "image/jpeg", 0.92)
+  } catch { return undefined } // tainted canvas: fall back to the uncropped image
+}
+
 async function toDataUrl(src: string): Promise<string | undefined> {
   try {
     const res = await fetch(src, { mode: "cors" })
@@ -101,8 +145,44 @@ export async function exportPptx(deck: DeckModel, getSlideRoot: (index: number) 
           return
         case "image": {
           const img = node.querySelector("img")
-          const data = p.src ? await toDataUrl(String(p.src)) : undefined
-          if (img && data) { const ib = boxOf(img); s.addImage({ data, ...ib, sizing: { type: p.fit === "contain" ? "contain" : "cover", w: ib.w, h: ib.h } }) }
+          const frame = node.querySelector("[data-frame]") as HTMLElement | null
+          if (!img || !frame) return
+          const fb = boxOf(frame)
+          const cropped = croppedImage(img, frame, p)
+          if (cropped) { s.addImage({ data: cropped, ...fb }); return }
+          const data = await toDataUrl(img.currentSrc || img.src)
+          if (data) s.addImage({ data, ...fb, sizing: { type: p.fit === "contain" ? "contain" : "cover", w: fb.w, h: fb.h } })
+          return
+        }
+        case "icon": {
+          const svg = node.querySelector("svg")
+          if (svg) { const ib = boxOf(svg); s.addImage({ data: svgDataUrl(svg, svg.getBoundingClientRect().width / scale, svg.getBoundingClientRect().height / scale), ...ib }) }
+          return
+        }
+        case "flow": case "tree": case "timeline": case "cycle": {
+          // Connectors as one vector image underneath, nodes as native, editable shapes on top.
+          const svg = node.querySelector("svg[data-edges]") as SVGSVGElement | null
+          if (svg) s.addImage({ data: svgDataUrl(svg, svg.width.baseVal.value, svg.height.baseVal.value), ...boxOf(svg) })
+          node.querySelectorAll<HTMLElement>("[data-type=step], [data-type=node]").forEach((n) => {
+            const b = boxOf(n)
+            const ncs = getComputedStyle(n)
+            const kind = n.dataset.kind
+            const timeline = el.type === "timeline"
+            const texts = [...n.querySelectorAll<HTMLElement>(timeline ? "div > div" : "[data-text], [data-text] ~ div")].filter((t) => t.childElementCount === 0 && t.textContent?.trim())
+            const diamond = n.querySelector("polygon")
+            const fill = diamond ? getComputedStyle(diamond).fill : ncs.backgroundColor
+            const border = diamond ? getComputedStyle(diamond).stroke : ncs.borderTopColor
+            if (!timeline) {
+              const shape = kind === "diamond" ? pptx.ShapeType.diamond : kind === "circle" ? pptx.ShapeType.ellipse : pptx.ShapeType.roundRect
+              s.addShape(shape, { ...b, fill: toHex(fill) ? { color: hex(fill) } : undefined, line: { color: hex(border, "DDDDDD"), width: 1.5 }, rectRadius: kind === "pill" ? 0.5 : 0.08 })
+            }
+            const runs = texts.map((t, i) => {
+              const tcs = getComputedStyle(t)
+              const fsz = parseFloat(tcs.fontSize) * 0.5 * (b.w / Math.max(1, n.offsetWidth * IN_PER_UNIT))
+              return { text: t.textContent!.trim(), options: { fontSize: Math.max(6, fsz), bold: parseInt(tcs.fontWeight) >= 600, color: hex(tcs.color), breakLine: i < texts.length - 1, fontFace: family(tcs.fontFamily) } }
+            })
+            if (runs.length) s.addText(runs, { ...b, align: "center", valign: timeline ? "top" : "middle", margin: 4, fit: "shrink" })
+          })
           return
         }
         case "shape": {

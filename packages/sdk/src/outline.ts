@@ -9,6 +9,10 @@ function summarize(el: ElementNode): string {
     case "table": return `table (${(p.rows as unknown[])?.length ?? 0} rows)`
     case "stat": return `stat ${p.value} ${p.label ?? ""}`
     case "row": case "column": case "card": return `${el.type} [${el.children?.map(summarize).join("; ")}]`
+    case "icon": return `icon ${p.name ?? "?"}`
+    case "flow": case "cycle": return `${el.type} diagram: ${el.children?.map((c) => c.text).join(el.type === "cycle" ? " → … → " : " → ")}`
+    case "timeline": return `timeline: ${el.children?.map((c) => `${c.props.date ? `${c.props.date} ` : ""}${c.text}`).join(" | ")}`
+    case "tree": { let n = 0; walkEls(el.children ?? [], () => n++); return `tree (${n} nodes) rooted at "${el.children?.[0]?.text ?? ""}"` }
     default: return `${el.type} "${(el.text ?? "").replace(/\n/g, " ").slice(0, 80)}"`
   }
 }
@@ -22,6 +26,17 @@ export function outline(deck: DeckModel): string {
     if (s.notes) lines.push(`  notes: ${s.notes.replace(/\n/g, " ").slice(0, 100)}`)
   }
   return lines.join("\n")
+}
+
+/** Asset files the deck references ("assets/<name>"), for saving a deck with its images. */
+export function assetRefs(deck: DeckModel): string[] {
+  const out = new Set<string>()
+  const add = (v: unknown) => { if (typeof v === "string" && v.startsWith("assets/")) out.add(v.slice(7)) }
+  for (const s of deck.slides) {
+    add(s.props.background)
+    walkEls(s.elements, (el) => add(el.props.src))
+  }
+  return [...out]
 }
 
 const words = (s = "") => s.split(/\s+/).filter(Boolean).length

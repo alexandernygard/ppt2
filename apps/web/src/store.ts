@@ -24,6 +24,7 @@ import {
   type PatchResult,
 } from "@ppt2/sdk"
 import { findElement, type Box, type TextField } from "@ppt2/react"
+import { addImages } from "./library"
 
 export type View = "split" | "canvas" | "code"
 type Origin = "code" | "canvas" | "ai" | "history" | "load"
@@ -44,8 +45,15 @@ interface State {
   /** While the AI streams a new deck: the raw code so far and a best-effort compiled preview. */
   aiPreview: { source: string; deck?: DeckModel } | null
   presenting: { index: number; step: number; speaker: boolean } | null
+  /** Image being cropped on the canvas. */
+  cropping: string | null
 
   setSource: (source: string, origin: Origin) => void
+  /** Load another deck: replaces the source and starts a fresh undo history. */
+  openSource: (source: string) => void
+  setCropping: (path: string | null) => void
+  /** Store images with the deck and put them on the current slide (or into the image at `at.path`). */
+  insertImages: (files: Blob[], at?: { x: number; y: number; path?: string }) => Promise<void>
   undo: () => void
   redo: () => void
   setView: (v: View) => void
@@ -60,7 +68,7 @@ interface State {
   setElementProps: (path: string, props: Record<string, unknown>) => void
   deleteElement: (path: string) => void
   duplicateSelected: () => void
-  addElement: (type: string) => void
+  addElement: (type: string, props?: Record<string, unknown>) => void
   addSlide: (layout?: string) => void
   duplicateSlide: (index: number) => void
   deleteSlide: (index: number) => void
@@ -94,6 +102,7 @@ export const useStore = create<State>()((set, get) => ({
   revision: 0,
   aiPreview: null,
   presenting: null,
+  cropping: null,
 
   setSource(source, origin) {
     const s = get()
@@ -116,6 +125,42 @@ export const useStore = create<State>()((set, get) => ({
     try { localStorage.setItem(STORAGE_KEY, source) } catch { /* private mode */ }
   },
 
+  openSource(source) {
+    const c = compiled(source)
+    set({ source, ...c, deck: c.deck, past: [], future: [], current: 0, selected: null, cropping: null, lastOrigin: "load", revision: get().revision + 1, aiPreview: null })
+    try { localStorage.setItem(STORAGE_KEY, source) } catch { /* private mode */ }
+  },
+  setCropping: (cropping) => set({ cropping, ...(cropping ? { selected: cropping } : {}) }),
+  async insertImages(files, at) {
+    const { current, deck } = get()
+    if (!deck) { toast.error("Fix the code errors first"); return }
+    let added: Awaited<ReturnType<typeof addImages>>
+    try { added = await addImages(files) } catch (e) { toast.error(`Couldn't add the image: ${(e as Error).message}`); return }
+    if (at?.path && added.length) {
+      get().setElementProps(at.path, { src: added.shift()!.ref })
+      if (!added.length) return
+    }
+    const slide = get().deck?.slides[current]
+    if (!slide) return
+    // A free media slot takes the first image in the flow; others are placed where they were dropped.
+    const hasMediaSlot = ["image-left", "image-right", "full-image"].includes(slide.layout)
+    let mediaFree = hasMediaSlot && !slide.elements.some((e) => e.type === "image" && e.props.x == null && e.props.y == null)
+    added.forEach((img, i) => {
+      let code: string
+      if (mediaFree) { code = elementCode("image", { src: img.ref, alt: "" }); mediaFree = false }
+      else {
+        const aspect = img.width && img.height ? img.width / img.height : 4 / 3
+        const w = Math.round(aspect >= 1 ? 720 : 520 * aspect), h = Math.round(w / aspect)
+        const W = get().deck!.width, H = get().deck!.height
+        const cx = (at?.x ?? W / 2) + i * 40, cy = (at?.y ?? H / 2) + i * 40
+        const x = Math.round(Math.max(0, Math.min(W - w, cx - w / 2))), y = Math.round(Math.max(0, Math.min(H - h, cy - h / 2)))
+        code = elementCode("image", { src: img.ref, alt: "", x, y, w, h })
+      }
+      const before = get().deck?.slides[current]?.elements.length ?? 0
+      if (get().patch((src, d) => insertElement(src, d.slides[current].src!, code), "Insert image")) set({ selected: `${current}/${before}` })
+    })
+  },
+
   undo() {
     const { past, source, future } = get()
     if (!past.length) return
@@ -134,9 +179,9 @@ export const useStore = create<State>()((set, get) => ({
   setView: (view) => set({ view }),
   go: (index) => {
     const n = get().deck?.slides.length ?? 0
-    set({ current: Math.max(0, Math.min(index, n - 1)), selected: null })
+    set({ current: Math.max(0, Math.min(index, n - 1)), selected: null, cropping: null })
   },
-  select: (selected) => set({ selected }),
+  select: (selected) => set({ selected, ...(selected !== get().cropping ? { cropping: null } : {}) }),
   present: (opts) => {
     if (!get().deck?.slides.length) return
     set({ presenting: { index: opts?.fromStart ? 0 : get().current, step: 0, speaker: !!opts?.speaker } })
@@ -185,8 +230,13 @@ export const useStore = create<State>()((set, get) => ({
       return duplicateElement(src, srcOf(deck, selected), abs ? { x: (el.props.x ?? 0) + 40, y: (el.props.y ?? 0) + 40 } : {})
     }, "Duplicate")
   },
-  addElement(type) {
+  addElement(type, props) {
     const { current } = get()
+    if (type === "icon" && props) {
+      const before = get().deck?.slides[current]?.elements.length ?? 0
+      if (get().patch((src, deck) => insertElement(src, deck.slides[current].src!, elementCode("icon", props)), "Insert")) set({ selected: `${current}/${before}` })
+      return
+    }
     const code: Record<string, string> = {
       text: elementCode("text", {}, "New text"),
       title: elementCode("title", {}, "New title"),
@@ -197,6 +247,11 @@ export const useStore = create<State>()((set, get) => ({
       stat: elementCode("stat", { value: "42%", label: "Something that grew" }),
       quote: elementCode("quote", { by: "Someone wise" }, "A short, memorable line."),
       code: `<Code lang="ts">{\`const deck = compile(source)\`}</Code>`,
+      icon: elementCode("icon", { name: "sparkles" }),
+      flow: `<Flow>\n  <Step icon="lightbulb">Idea</Step>\n  <Step icon="pencil">Draft</Step>\n  <Step icon="users">Review</Step>\n  <Step icon="rocket" highlight>Ship</Step>\n</Flow>`,
+      timeline: `<Timeline>\n  <Step date="Q1">Research</Step>\n  <Step date="Q2">Beta</Step>\n  <Step date="Q3" highlight>Launch</Step>\n  <Step date="Q4">Scale</Step>\n</Timeline>`,
+      tree: `<Tree>\n  <Node sub="Name">\n    CEO\n    <Node sub="Name">CTO</Node>\n    <Node sub="Name">COO</Node>\n    <Node sub="Name">CFO</Node>\n  </Node>\n</Tree>`,
+      cycle: `<Cycle>\n  <Step icon="search">Discover</Step>\n  <Step icon="pencil-ruler">Design</Step>\n  <Step icon="hammer">Build</Step>\n  <Step icon="chart-line">Measure</Step>\n</Cycle>`,
     }
     const before = get().deck?.slides[current]?.elements.length ?? 0
     if (get().patch((src, deck) => insertElement(src, deck.slides[current].src!, code[type] ?? code.text), "Insert")) {

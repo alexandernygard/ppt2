@@ -6,6 +6,7 @@ import { create } from "zustand"
 import { toJpeg } from "html-to-image"
 import { applyEdits, compile, elementRange, lintDeck, outline, PatchError, type Diagnostic } from "@ppt2/sdk"
 import { findElement, inspectSlideElement } from "@ppt2/react"
+import { useLibrary } from "../library"
 import { useStore } from "../store"
 import { farmSlide, settled } from "../components/RenderFarm"
 import { SYSTEM_PROMPT, userTurn } from "./prompt"
@@ -110,7 +111,7 @@ export const useChat = create<ChatState>()((set, get) => ({
     const sel = app.selected && slide ? findElement(slide.elements, app.selected) : undefined
     const selCode = sel?.src != null ? app.source.slice(sel.src, sourceEnd(app.source, sel.src)) : undefined
 
-    const history = [...get().history, { role: "user" as const, content: userTurn({ text, source: app.source, slide: app.current, selection: app.selected ? { path: app.selected, code: selCode } : undefined, attachments }) }]
+    const history = [...get().history, { role: "user" as const, content: userTurn({ text, source: app.source, slide: app.current, selection: app.selected ? { path: app.selected, code: selCode } : undefined, attachments, assets: useLibrary.getState().assets }) }]
     const assistantId = uid()
     const abort = new AbortController()
     set({

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { compile } from "./compile"
 import { setProps, setText, moveSlide, insertSlide, removeSlide, duplicateSlide, insertElement, removeElement, applyEdits, PatchError, elementCode, replaceSlide } from "./patch"
 import { STARTER_DECK } from "./starter"
-import { lintDeck, outline } from "./outline"
+import { lintDeck, outline, assetRefs } from "./outline"
 
 const SRC = `import { Deck, Slide, Title, Text, List } from "ppt2"
 
@@ -167,5 +167,71 @@ describe("patch round-trips", () => {
     expect(r.template).toBe(true)
     expect(() => setText(src, d.slides[0].elements[0].src!, "x")).toThrow(PatchError)
     expect(() => moveSlide(src, d.src!, 0, 1)).toThrow(PatchError)
+  })
+
+  describe("diagrams, icons and assets", () => {
+    const DIA = `import { Deck, Slide, Flow, Step, Tree, Node, Icon, Image } from "ppt2"
+
+export default (
+  <Deck>
+    <Slide>
+      <Flow>
+        <Step icon="pencil">Draft</Step>
+        <Step id="ok" kind="diamond" to="ship:Yes">Tests pass?</Step>
+        <Step id="ship">Ship</Step>
+        <Text>not allowed</Text>
+      </Flow>
+      <Icon name="rocket" />
+      <Image src="assets/team.jpg" focus="40% 20%" />
+    </Slide>
+    <Slide background="assets/bg.png">
+      <Tree>
+        <Node sub="Ada">
+          CEO
+          <Node>CTO</Node>
+          <Node>CFO</Node>
+        </Node>
+      </Tree>
+      <Step>stray</Step>
+    </Slide>
+  </Deck>
+)`
+
+    it("normalizes diagram items and warns about misplaced ones", () => {
+      const r = compile(DIA)
+      const flow = r.deck!.slides[0].elements[0]
+      expect(flow.type).toBe("flow")
+      expect(flow.children!.map((c) => c.text)).toEqual(["Draft", "Tests pass?", "Ship"])
+      expect(flow.children![1].props.to).toBe("ship:Yes")
+      const tree = r.deck!.slides[1].elements[0]
+      expect(tree.children![0].text).toBe("CEO")
+      expect(tree.children![0].children!.map((c) => [c.path, c.text])).toEqual([["1/0/0/0", "CTO"], ["1/0/0/1", "CFO"]])
+      expect(r.deck!.slides[1].elements).toHaveLength(1)
+      expect(r.warnings.map((w) => w.message).join("\n")).toMatch(/can only contain <Step>[\s\S]*must be inside <Flow>/)
+      expect(outline(r.deck!)).toContain("flow diagram: Draft → Tests pass? → Ship")
+    })
+
+    it("edits a tree node label without touching its children", () => {
+      const d = compile(DIA).deck!
+      const ceo = d.slides[1].elements[0].children![0]
+      const out = setText(DIA, ceo.src!, "Chief executive").source
+      expect(out).toContain(`<Node sub="Ada">
+          Chief executive
+          <Node>CTO</Node>`)
+      const again = compile(out).deck!.slides[1].elements[0].children![0]
+      expect(again.text).toBe("Chief executive")
+      expect(again.children).toHaveLength(2)
+    })
+
+    it("adds a prop while changing or removing the last one", () => {
+      const src = `export default <Deck><Slide><Image src="a" zoom={1.5} /></Slide></Deck>`
+      const at = compile(src).deck!.slides[0].elements[0].src!
+      expect(setProps(src, at, { focus: "80% 20%", zoom: 2 }).source).toContain(`<Image src="a" zoom={2} focus="80% 20%" />`)
+      expect(setProps(src, at, { focus: "80% 20%", zoom: undefined }).source).toContain(`<Image src="a" focus="80% 20%" />`)
+    })
+
+    it("lists referenced assets", () => {
+      expect(assetRefs(compile(DIA).deck!).sort()).toEqual(["bg.png", "team.jpg"])
+    })
   })
 })

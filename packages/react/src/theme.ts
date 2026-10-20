@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react"
 import type { SlideNode, Theme } from "@ppt2/sdk"
+import { isAssetRef, resolveSrc } from "./assets"
 
 const TOKENS = new Set(["accent", "muted", "text", "surface", "background", "border", "accentText"])
 
@@ -64,7 +65,8 @@ export function slideStyle(theme: Theme, slide: SlideNode): CSSProperties {
   const bg = slide.props.background
   let base = "var(--p-background)"
   if (typeof bg === "string" && bg) {
-    if (/^(https?:|\/|data:)/.test(bg)) layers.push(`center / cover no-repeat url("${bg}")`)
+    if (isAssetRef(bg)) layers.push(`center / cover no-repeat url("${resolveSrc(bg)}")`)
+    else if (/^(https?:|\/|data:|blob:)/.test(bg)) layers.push(`center / cover no-repeat url("${bg}")`)
     else if (bg.includes("gradient(")) layers.push(bg)
     else base = color(bg) ?? bg
   }

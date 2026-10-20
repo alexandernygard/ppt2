@@ -15,9 +15,9 @@ Add your Anthropic API key under the gear icon. Everything runs in the browser; 
 
 | Package | What it is |
 |---|---|
-| `packages/sdk` (`@ppt2/sdk`) | The deck language: components (`Deck`, `Slide`, `Title`, `Text`, `List`, `Image`, `Shape`, `Chart`, `Table`, `Code`, `Stat`, `Quote`, `Row`, `Column`, `Card`, `Notes`), `csv` helper, themes, layouts, the compiler (source → model), **source patches** (model edits → minimal text edits), outline/lint, and `REFERENCE`, an LLM-readable spec of the language. No React. |
-| `packages/react` (`@ppt2/react`) | Rendering: `SlideView` (native 1920×1080), `Stage` (scales any fixed canvas to any box), `EditableSlide` (select, drag, resize, snap, inline text), `Presenter` (builds, transitions, speaker view), `inspectSlideElement` (rendered overflow checks), `exportPptx`. Uses @alexandernygard/components (Chart, CodeBlock, Table). |
-| `apps/web` | The editor: Vite + React + Tailwind 4 + zustand + CodeMirror + Claude API. |
+| `packages/sdk` (`@ppt2/sdk`) | The deck language: components (`Deck`, `Slide`, `Title`, `Text`, `List`, `Image`, `Icon`, `Shape`, `Chart`, `Table`, `Code`, `Stat`, `Quote`, `Row`, `Column`, `Card`, `Notes`, and the diagrams `Flow`, `Tree`, `Timeline`, `Cycle` with `Step`/`Node`), `csv` helper, themes, layouts, the compiler (source → model), **source patches** (model edits → minimal text edits), outline/lint, and `REFERENCE`, an LLM-readable spec of the language. No React. |
+| `packages/react` (`@ppt2/react`) | Rendering: `SlideView` (native 1920×1080), `Stage` (scales any fixed canvas to any box), `EditableSlide` (select, drag, resize, snap, inline text), `Presenter` (builds, transitions, speaker view), `inspectSlideElement` (rendered overflow checks), `exportPptx`, diagram layout (dagre for flows, a tidy-tree layout for org charts), Lucide icons, image crop. Uses @alexandernygard/components (Chart, CodeBlock, Table). |
+| `apps/web` | The editor: Vite + React + Tailwind 4 + zustand + CodeMirror + Claude API, plus the deck library (IndexedDB) and disk sync. |
 
 ```tsx
 import { Deck, Slide, Title, Chart, Notes, csv } from "ppt2"
@@ -64,6 +64,25 @@ Dragging an element **pins** it: it gains `x/y/w` and leaves the flow, and the o
 - **Context-aware actions:** tighten, suggest layouts, make it visual, speaker notes, restyle, review. You can paste or attach CSV to turn data into a chart.
 - **Every AI edit is undoable**, and each one is a reviewable diff of the source.
 
+## Decks, files and images
+
+- **Library.** Any number of decks live in IndexedDB and save as you type. Click the deck title to switch, duplicate or delete.
+- **Version history.** A snapshot every 10 minutes of editing, before every AI edit and before a restore, plus versions you name. File → Version history previews any snapshot slide by slide; restoring is undoable.
+- **Files on disk** (Chromium browsers, File System Access API). *Save as folder* writes `deck.tsx` plus an `assets/` folder; *Save as file* writes a single `.deck.tsx`. Once linked, edits save to disk, and changes made on disk (an editor, `git pull`, Claude Code) load into the open deck within a couple of seconds. After a reload the browser asks for permission again ("Reconnect").
+- **Images.** Paste, drop onto the slide (or onto an image to replace it) or upload from Insert. They're stored with the deck and referenced as `src="assets/photo.jpg"`, so the source stays portable. Large photos are downscaled to 3200px. Double-click an image (or use Crop) to reposition and zoom it inside its frame; that writes `focus="30% 60%"` and `zoom={1.4}`.
+- **Icons.** `<Icon name="rocket" />` with the full Lucide set and a searchable picker.
+- **Diagrams.** `<Flow>`, `<Tree>`, `<Timeline>` and `<Cycle>` describe steps and connections; layout is automatic and scales to fit its slot. Node labels are editable inline on the canvas, and PPTX export turns nodes into native shapes with the connectors as one vector image.
+
+```tsx
+<Flow>
+  <Step icon="pencil">Draft</Step>
+  <Step id="review">Review</Step>
+  <Step kind="diamond" to="ship:Yes fix:No">Tests pass?</Step>
+  <Step id="ship" to="">Ship</Step>
+  <Step id="fix" to="review">Fix</Step>
+</Flow>
+```
+
 ## Present, export
 
 - **Present**: fullscreen, arrows/space/PageUp/Down, `S` speaker view (current, next, notes, timer, build counter), `B` black screen, `Esc` to exit. Builds use `step={n}` and `animate="rise"`; slide transitions use `transition="fade"`. In speaker view, "Open audience window" opens a second window that stays in sync over BroadcastChannel.
@@ -78,7 +97,9 @@ Dragging an element **pins** it: it gains `x/y/w` and leaves the flow, and the o
 - **Round-trip edges.** Visual edits can't change computed values, and a dragged element in a component has no single place to write its position. That's by design, but it means some decks are "code-only" in places. A future option would be per-instance overrides written next to the call site.
 - **Rich text is markdown-lite** (bold, italic, code, highlight, links, bullets). Per-character styling, like coloring one word, needs either more inline syntax or a real rich-text node type. Inline editing uses a raw-text overlay, not WYSIWYG.
 - **Layout engine = CSS.** Exact layout depends on browser fonts. PPTX export measures the browser's layout, so it's faithful to what you saw, but text in PowerPoint reflows with PowerPoint's own font metrics. Gradients/backdrops and Markdown inline styles aren't carried into PPTX, and PPTX import isn't implemented. A deterministic, font-metric-aware layout engine (e.g. Yoga plus measured text) would make export and server-side rendering exact.
-- **No multi-select, grouping, z-order controls, or alignment tools** beyond snapping. No image upload (URLs only; placeholders come from picsum.photos). Undo is source-level, with typing coalesced into one step per pause.
+- **No multi-select, grouping, z-order controls, or alignment tools** beyond snapping.
+- **Files and assets.** Disk sync needs the File System Access API (Chrome, Edge, Arc); elsewhere decks stay in the browser and can be imported or downloaded. Fonts aren't stored with a deck yet. Deck thumbnails in the library only show images for the open deck. Deleting an image from a slide leaves the asset stored with the deck. The bundle is ~3.8 MB because every Lucide icon is included so any name the AI writes works.
+- **Diagram layout is estimated**, not measured: node sizes come from label length, so very long labels can crowd a node. Big diagrams shrink to fit (the AI gets a warning when text drops below 60%). Undo is source-level, with typing coalesced into one step per pause.
 - **The AI loop was tested against a scripted mock of the streaming API, not the live model** (no key was available while building). Live behavior, such as how well it follows the style guide, still needs a real run.
 - **Performance.** Every edit recompiles and re-renders all thumbnails plus the offscreen render farm. That's fine for dozens of slides, and would need memoizing by slide source range for hundreds.
 

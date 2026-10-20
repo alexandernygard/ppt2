@@ -16,15 +16,20 @@ import {
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart, Pie, PieChart, XAxis, YAxis } from "recharts"
 import { color, fontSize } from "./theme"
 import { BulletList, Markdown } from "./markdown"
+import { resolveSrc } from "./assets"
+import { iconFor } from "./icons"
+import { DiagramEl } from "./diagrams"
 
 export type Box = { x?: number; y?: number; w?: number; h?: number }
+/** Live, uncommitted prop changes while a gesture is in progress (geometry, crop). */
+export type Override = Box & Record<string, unknown>
 
 export interface RenderOptions {
   mode: "edit" | "present" | "static"
   /** Present mode: current build step. Elements with a higher step are hidden. */
   step?: number
-  /** Live geometry while dragging/resizing, keyed by element path. */
-  overrides?: Record<string, Box>
+  /** Live geometry or props while dragging, resizing or cropping, keyed by element path. */
+  overrides?: Record<string, Override>
   /** Paths to hide (e.g. while being edited inline). */
   hidden?: Set<string>
 }
@@ -47,12 +52,14 @@ function titleSize(layout: LayoutName) {
   return 72
 }
 
-const GROWS = new Set(["chart", "image", "table", "code"])
+const GROWS = new Set(["chart", "image", "table", "code", "flow", "tree", "timeline", "cycle"])
 
 /** Wraps every element: positioning, common style props, build steps and the data-path hook for editing. */
-export function ElementView({ el, absolute }: { el: ElementNode; absolute?: boolean }) {
+export function ElementView({ el: node, absolute }: { el: ElementNode; absolute?: boolean }) {
   const opts = useContext(RenderContext)
   const { layout, slot } = useContext(SlotContext)
+  const live = opts.overrides?.[node.path]
+  const el = live ? { ...node, props: { ...node.props, ...live } } : node
   const p = el.props
   const box = { x: p.x, y: p.y, w: p.w, h: p.h, ...opts.overrides?.[el.path] }
   const isAbs = absolute || box.x != null || box.y != null
@@ -132,6 +139,13 @@ function ElementBody({ el, layout, slot }: { el: ElementNode; layout: LayoutName
     case "column":
     case "card":
       return <Container el={el} />
+    case "icon":
+      return <IconEl el={el} />
+    case "flow":
+    case "tree":
+    case "timeline":
+    case "cycle":
+      return <DiagramEl el={el} />
     default:
       return null
   }
@@ -165,17 +179,43 @@ function Container({ el }: { el: ElementNode }) {
 
 function ImageEl({ el, bleed }: { el: ElementNode; bleed: boolean }) {
   const p = el.props
+  const focus = typeof p.focus === "string" && p.focus ? p.focus : "50% 50%"
+  const zoom = typeof p.zoom === "number" && p.zoom > 0 ? p.zoom : 1
+  const src = resolveSrc(p.src)
   return (
     <figure style={{ margin: 0, width: "100%", height: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-      <img
-        src={String(p.src ?? "")}
-        alt={String(p.alt ?? "")}
-        draggable={false}
-        crossOrigin="anonymous"
-        style={{ width: "100%", height: "100%", minHeight: 0, flex: 1, objectFit: (p.fit as "cover" | "contain") ?? "cover", borderRadius: bleed ? 0 : "var(--p-radius)", display: "block" }}
-      />
+      <div data-frame style={{ position: "relative", flex: 1, minHeight: 0, width: "100%", height: "100%", overflow: "hidden", borderRadius: bleed ? 0 : "var(--p-radius)", background: src ? undefined : "var(--p-surface)" }}>
+        {src ? (
+          <img
+            src={src}
+            alt={String(p.alt ?? "")}
+            draggable={false}
+            crossOrigin={src.startsWith("blob:") || src.startsWith("data:") ? undefined : "anonymous"}
+            style={{ width: "100%", height: "100%", objectFit: (p.fit as "cover" | "contain") ?? "cover", objectPosition: focus, transform: zoom !== 1 ? `scale(${zoom})` : undefined, transformOrigin: focus, display: "block" }}
+          />
+        ) : (
+          <div data-missing-asset={String(p.src ?? "")} style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--p-muted)", fontSize: 26, border: "3px dashed var(--p-border)", borderRadius: "inherit" }}>{p.src ? `Missing image: ${String(p.src)}` : "No image"}</div>
+        )}
+      </div>
       {p.caption ? <figcaption style={{ fontSize: 26, color: "var(--p-muted)" }}>{String(p.caption)}</figcaption> : null}
     </figure>
+  )
+}
+
+function IconEl({ el }: { el: ElementNode }) {
+  const p = el.props
+  const Icon = iconFor(p.name)
+  const size = fontSize(p.size, 96)
+  const justify = p.align === "center" ? "center" : p.align === "right" ? "flex-end" : "flex-start"
+  const box = p.w != null || p.h != null
+  return (
+    <div style={{ display: "flex", justifyContent: justify, alignItems: "center", width: box ? "100%" : undefined, height: box ? "100%" : undefined, color: color(p.color) ?? "var(--p-accent)" }}>
+      {Icon ? (
+        <Icon width={box ? "100%" : size} height={box ? "100%" : size} strokeWidth={(p.strokeWidth as number) ?? 1.75} absoluteStrokeWidth={false} />
+      ) : (
+        <div data-missing-icon={String(p.name ?? "")} style={{ width: size, height: size, display: "grid", placeItems: "center", border: "3px dashed currentColor", borderRadius: 16, fontSize: size * 0.4, opacity: 0.6 }}>?</div>
+      )}
+    </div>
   )
 }
 

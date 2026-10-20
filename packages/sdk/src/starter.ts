@@ -1,4 +1,4 @@
-export const STARTER_DECK = `import { Deck, Slide, Title, Subtitle, Text, List, Image, Chart, Stat, Quote, Row, Card, Shape, Notes, csv } from "ppt2"
+export const STARTER_DECK = `import { Deck, Slide, Title, Subtitle, Text, List, Image, Chart, Stat, Quote, Row, Card, Shape, Flow, Step, Notes, csv } from "ppt2"
 
 // Data lives next to the slides that use it.
 const growth = csv\`
@@ -34,6 +34,16 @@ export default (
         <Text color="muted">Layouts place content. Drag an element to pin it with x/y.</Text>
       </Card>
       <Notes>Show a drag on the canvas, then point at the diff in the code view.</Notes>
+    </Slide>
+
+    <Slide layout="content">
+      <Title>Every edit is a code patch</Title>
+      <Flow>
+        <Step icon="mouse-pointer-2" note="drag, type, reorder">Canvas</Step>
+        <Step icon="file-code" note="a minimal text edit" highlight>Source</Step>
+        <Step icon="presentation" note="compiled and rendered">Slides</Step>
+      </Flow>
+      <Notes>Diagrams are declarative too: steps and arrows, laid out automatically.</Notes>
     </Slide>
 
     <Slide layout="grid" columns={3}>

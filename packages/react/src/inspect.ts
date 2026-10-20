@@ -23,5 +23,15 @@ export function inspectSlideElement(root: HTMLElement, slideIndex: number): Diag
       out.push({ severity: "warning", slide: slideIndex, path: el.dataset.path, message: `${label}: a word in the ${el.dataset.type} is too long for its box` })
     }
   })
+  root.querySelectorAll<HTMLElement>("[data-missing-icon]").forEach((el) => {
+    out.push({ severity: "warning", slide: slideIndex, message: `${label}: unknown icon "${el.dataset.missingIcon}" — use a Lucide icon name in kebab-case` })
+  })
+  root.querySelectorAll<HTMLElement>("[data-missing-asset]").forEach((el) => {
+    if (el.dataset.missingAsset) out.push({ severity: "warning", slide: slideIndex, message: `${label}: image "${el.dataset.missingAsset}" is not in this deck's assets` })
+  })
+  root.querySelectorAll<HTMLElement>("[data-diagram-scale]").forEach((el) => {
+    const s = parseFloat(el.dataset.diagramScale ?? "1")
+    if (s < 0.6) out.push({ severity: "warning", slide: slideIndex, message: `${label}: the diagram is shrunk to ${Math.round(s * 100)}% to fit, so its text is small — use fewer or shorter steps, or give it more room` })
+  })
   return out
 }

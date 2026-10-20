@@ -17,9 +17,12 @@ import { layouts } from "./layouts"
 import type { CompileResult, DeckModel, Diagnostic, ElementNode, ElementType, LayoutName, SlideNode, Aspect } from "./types"
 
 const ASPECTS: Record<Aspect, number> = { "16:9": 1920, "4:3": 1440, "16:10": 1728, "1:1": 1080 }
-const TEXT_TYPES = new Set(["title", "subtitle", "text", "code", "quote", "shape", "notes", "stat"])
-const CONTAINER_TYPES = new Set(["row", "column", "card"])
-const ELEMENT_TYPES = new Set<string>(["title", "subtitle", "text", "list", "image", "shape", "chart", "table", "code", "stat", "quote", "row", "column", "card"])
+const TEXT_TYPES = new Set(["title", "subtitle", "text", "code", "quote", "shape", "notes", "stat", "step", "node"])
+const CONTAINER_TYPES = new Set(["row", "column", "card", "flow", "tree", "timeline", "cycle", "node"])
+const ELEMENT_TYPES = new Set<string>(["title", "subtitle", "text", "list", "image", "shape", "chart", "table", "code", "stat", "quote", "row", "column", "card", "icon", "flow", "tree", "timeline", "cycle", "step", "node"])
+/** Diagrams only accept their own item type as children. */
+const ITEM_OF: Record<string, string> = { flow: "step", timeline: "step", cycle: "step", tree: "node", node: "node" }
+const DIAGRAM_OF: Record<string, string> = { step: "<Flow>, <Timeline> or <Cycle>", node: "<Tree>" }
 
 export function instrument(source: string): string {
   const ast = parseSource(source)
@@ -150,13 +153,23 @@ function normalizeSlide(node: PNode, index: number, warn: (m: string, src?: numb
   }
 }
 
-function normalizeElement(child: Child, path: string, warn: (m: string, src?: number, slide?: number) => void, slide: number): ElementNode | undefined {
+function normalizeElement(child: Child, path: string, warn: (m: string, src?: number, slide?: number) => void, slide: number, parent?: string): ElementNode | undefined {
+  const item = parent ? ITEM_OF[parent] : undefined
   if (!isPNode(child)) {
     const text = String(child).trim()
+    if (item) return undefined // a node's label, handled by the parent
     return text ? { type: "text", path, props: {}, text } : undefined
   }
   if (!ELEMENT_TYPES.has(child.type)) {
     warn(`Unknown element <${child.type}>`, child.src, slide)
+    return undefined
+  }
+  if (item && child.type !== item) {
+    warn(`<${parent}> can only contain <${item === "step" ? "Step" : "Node"}> elements, not <${child.type}>`, child.src, slide)
+    return undefined
+  }
+  if (!item && DIAGRAM_OF[child.type]) {
+    warn(`<${child.type === "step" ? "Step" : "Node"}> must be inside ${DIAGRAM_OF[child.type]}`, child.src, slide)
     return undefined
   }
   const type = child.type as ElementType
@@ -164,12 +177,13 @@ function normalizeElement(child: Child, path: string, warn: (m: string, src?: nu
   if (CONTAINER_TYPES.has(type)) {
     el.children = []
     for (const c of child.children) {
-      const n = normalizeElement(c, `${path}/${el.children.length}`, warn, slide)
+      const n = normalizeElement(c, `${path}/${el.children.length}`, warn, slide, type)
       if (n) el.children.push(n)
     }
-  } else if (TEXT_TYPES.has(type)) {
-    el.text = textOf(child.children)
-    if (child.children.some(isPNode)) warn(`<${type}> can only contain text`, child.src, slide)
+  }
+  if (TEXT_TYPES.has(type)) {
+    el.text = CONTAINER_TYPES.has(type) ? textOf(child.children).trim() : textOf(child.children)
+    if (!CONTAINER_TYPES.has(type) && child.children.some(isPNode)) warn(`<${type}> can only contain text`, child.src, slide)
   }
   if (type === "list" && !Array.isArray(el.props.items)) {
     // Allow <List>{"a\nb"}</List> as a shorthand.

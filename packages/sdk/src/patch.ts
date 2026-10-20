@@ -95,7 +95,8 @@ export function setProps(source: string, src: number, props: Record<string, unkn
       const last = attrs[attrs.length - 1]
       if (last) {
         const sep = multiline ? "\n" + indentAt(source, last.start) : " "
-        ms.appendLeft(last.end, sep + attrToCode(name, value, elIndent))
+        // appendRight attaches to what follows the attribute, so it survives an overwrite of that attribute.
+        ms.appendRight(last.end, sep + attrToCode(name, value, elIndent))
       } else {
         const after = opening.typeParameters?.end ?? opening.name.end
         ms.appendLeft(after, " " + attrToCode(name, value, elIndent))
@@ -122,6 +123,12 @@ export function setText(source: string, src: number, text: string): PatchResult 
     const e = meaningful[0].expression
     if (e.type === "TemplateLiteral" && e.expressions.length === 0) style = "template"
     else if (e.type !== "StringLiteral") throw new PatchError("This text is computed in code. Edit it in the code view.")
+  } else if (meaningful.some((k) => k.type === "JSXElement") && meaningful.every((k) => k.type === "JSXText" || k.type === "JSXElement")) {
+    // A label followed by nested elements (<Node>CEO<Node>…</Node></Node>): replace only the leading label.
+    const first = kids.find((k) => k.type === "JSXElement")!
+    const label = escapeJsxText(text.replace(/\s*\n\s*/g, " ").trim())
+    ms.overwrite(node.openingElement.end, first.start, label ? `\n${inner}${label}\n${inner}` : `\n${inner}`)
+    return { source: ms.toString(), template: isTemplate(ancestors) }
   } else if (meaningful.some((k) => k.type !== "JSXText")) {
     throw new PatchError("This text mixes code and text. Edit it in the code view.")
   }
