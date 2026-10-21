@@ -6,7 +6,7 @@
 
 import { create } from "zustand"
 import { toast } from "@alexandernygard/components"
-import { compile, assetRefs, fontFamilyOf, setProps, STARTER_DECK } from "@ppt2/sdk"
+import { compile, assetRefs, fontFamilyOf, setProps } from "@ppt2/sdk"
 import { addAssetUrl, setAssetUrls } from "@ppt2/react"
 import { db, type DeckRecord, type LinkRecord, type VersionRecord } from "./lib/db"
 import { useStore } from "./store"
@@ -27,6 +27,7 @@ interface LibraryState {
 export const useLibrary = create<LibraryState>()(() => ({ ready: false, decks: [], currentId: "", status: "saved", link: null, assets: {} }))
 
 const CURRENT_KEY = "ppt2.deck"
+const TAB_KEY = "ppt2.tab"
 const AUTO_VERSION_EVERY = 10 * 60_000
 const KEEP_AUTO_VERSIONS = 60
 const DECK_FILE = "deck.tsx"
@@ -237,12 +238,23 @@ async function activate(rec: DeckRecord) {
   await loadLink(rec.id)
 }
 
+/** True on a tab's first load, false on reloads. */
+function newTab(): boolean {
+  try {
+    if (sessionStorage.getItem(TAB_KEY)) return false
+    sessionStorage.setItem(TAB_KEY, "1")
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function boot() {
   let decks = await db.all("decks")
   if (!decks.length) {
     // First run (or upgrade from the single-deck version): keep what was in localStorage.
-    let source = STARTER_DECK
-    try { source = localStorage.getItem("ppt2.source") || STARTER_DECK } catch { /* ignore */ }
+    let source = BLANK_DECK
+    try { source = localStorage.getItem("ppt2.source") || BLANK_DECK } catch { /* ignore */ }
     const rec = record(source)
     await db.put("decks", rec)
     decks = [rec]
@@ -250,8 +262,21 @@ export async function boot() {
   decks.sort(byUpdated)
   let want: string | null = null
   try { want = localStorage.getItem(CURRENT_KEY) } catch { /* ignore */ }
+  let start = decks.find((d) => d.id === want) ?? decks[0]
+  // A new tab starts on an empty deck (an untouched one if there is one, so they don't pile up); a reload
+  // keeps the deck you were in, and a link (?file, ?room) opens its own deck. Earlier decks stay in the library.
+  const params = new URLSearchParams(location.search)
+  if (newTab() && !params.has("file") && !params.has("room")) {
+    const blank = decks.find((d) => d.source === BLANK_DECK && !d.roomId)
+    if (blank) start = blank
+    else {
+      start = record(BLANK_DECK)
+      await db.put("decks", start)
+      decks = [start, ...decks]
+    }
+  }
   set({ decks })
-  await activate(decks.find((d) => d.id === want) ?? decks[0])
+  await activate(start)
   useStore.subscribe((s, prev) => {
     if (suppress || s.source === prev.source) return
     if (s.lastOrigin === "ai" && (prev.lastOrigin !== "ai" || Date.now() - lastAiSnapshot > 60_000)) {

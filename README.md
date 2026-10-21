@@ -13,7 +13,7 @@ Add your Anthropic API key under the gear icon. Decks live in your browser; the 
 
 ### Sharing a deck live
 
-Share in the top bar makes the deck live: others open the link and edit together, seeing which slide each person is on and what they have selected. The deck source and its images and fonts sync through a Durable Object (`apps/worker`, built on `@alexandernygard/collab`); assets over 900 KB stay local. Undo is per person while a deck is shared. Anyone with the link can edit; there are no accounts yet.
+Share in the top bar needs a Nyggis account: it saves the deck to Drive, where you add people by email and choose who can edit, and you edit together, seeing which slide each person is on and what they have selected. Undo is per person while a deck is shared. Decks shared by link before Drive still sync through this app's Durable Object (`apps/worker`, built on `@alexandernygard/collab`; assets over 900 KB stay local) until they're saved to Drive or the link is turned off. A new tab starts on an empty deck; a reload keeps the deck you were in, and earlier decks stay in the library.
 
 ```bash
 pnpm dev:worker   # Worker + Durable Object on :8788 (vite proxies /collab to it)

@@ -7,31 +7,42 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Field,
-  FieldLabel,
-  Input,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
   cn,
 } from "@alexandernygard/components"
-import { CheckIcon, CopyIcon, UsersIcon } from "lucide-react"
+import { UsersIcon } from "lucide-react"
 import { toast } from "@alexandernygard/components"
-import { DriveFileButton, DriveLogo } from "@alexandernygard/drive/react"
-import { drive, newRoomId, saveToDrive, shareLink, useCollab } from "../collab"
+import type { Item } from "@alexandernygard/drive"
+import { DriveFileButton, DriveLogo, ShareDialog as DriveShareDialog, useDriveUser } from "@alexandernygard/drive/react"
+import { drive, saveToDrive, useCollab } from "../collab"
 import { shareDeck, useLibrary } from "../library"
 
-/** Share, for the deck that's open: Drive's sharing for a Drive deck, else live link sharing. */
+/** Share, for the deck that's open: Drive's sharing for a Drive deck, else saving it to Drive first. */
 export function ShareControls() {
   const deck = useLibrary((s) => s.decks.find((d) => d.id === s.currentId))
   const driveItem = useCollab((s) => s.driveItem)
   const peers = useCollab((s) => s.peers)
   const [sharing, setSharing] = useState(false)
+  // A deck just saved to Drive opens straight in Drive's share dialog.
+  const [saved, setSaved] = useState<Item | null>(null)
+  const shareSaved = (
+    <DriveShareDialog
+      itemId={saved?.id ?? ""}
+      initial={saved}
+      open={!!saved}
+      onOpenChange={(o) => !o && setSaved(null)}
+      onChange={(item) => useCollab.setState({ driveItem: item })}
+      drive={drive}
+    />
+  )
   if (deck?.drive && deck.roomId) {
     return (
       <>
         <Peers status />
         <DriveFileButton fileId={deck.roomId} item={driveItem} peers={peers.map((p) => p.state.user)} onItemChange={(item) => useCollab.setState({ driveItem: item })} />
+        {shareSaved}
       </>
     )
   }
@@ -39,7 +50,7 @@ export function ShareControls() {
     <>
       <Peers />
       <Button size="sm" variant={deck?.roomId ? "secondary" : "ghost"} onClick={() => setSharing(true)}><UsersIcon /> Share</Button>
-      <ShareDialog open={sharing} onOpenChange={setSharing} />
+      <ShareDialog open={sharing} onOpenChange={setSharing} onSaved={setSaved} />
     </>
   )
 }
@@ -95,16 +106,26 @@ export function Peers({ status: statusOnly = false }: { status?: boolean }) {
   )
 }
 
-export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const roomId = useLibrary((s) => s.decks.find((d) => d.id === s.currentId)?.roomId)
-  const name = useCollab((s) => s.name)
-  const failure = useCollab((s) => s.failure)
-  const [copied, setCopied] = useState(false)
-  const link = roomId ? shareLink(roomId) : ""
-  const copy = async () => {
-    await navigator.clipboard.writeText(link)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+/**
+ * Share for a deck that isn't in Drive: sharing needs an account, so it saves the deck to Drive, where you
+ * add people by email. Signed out, it asks you to sign in first.
+ */
+export function ShareDialog({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; onSaved: (item: Item) => void }) {
+  // Shared by link before Drive: anyone with the link can still edit until it's saved to Drive or stopped.
+  const linkRoom = useLibrary((s) => s.decks.find((d) => d.id === s.currentId && !d.drive)?.roomId)
+  const user = useDriveUser(drive)
+  const [saving, setSaving] = useState(false)
+  const signedOut = user.status === "signed-out"
+  const save = () => {
+    setSaving(true)
+    saveToDrive().then(
+      (item) => { setSaving(false); onOpenChange(false); onSaved(item) },
+      (e) => {
+        setSaving(false)
+        if (e?.signedOut) location.href = drive.loginUrl()
+        else toast.error(e?.message ?? "Couldn't save to Drive")
+      },
+    )
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -112,45 +133,29 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
         <DialogHeader>
           <DialogTitle>Share this deck</DialogTitle>
           <DialogDescription>
-            {roomId
-              ? "Anyone with this link can open the deck and edit it live with you. There are no accounts yet, so only share it with people you trust."
-              : "Make this deck live: others join from a link and you edit together, seeing which slide each person is on and what they have selected."}
+            {signedOut ? "Sign in to share. " : ""}Sharing saves the deck to Drive, where you add people by email and choose who can edit.
           </DialogDescription>
         </DialogHeader>
-        {failure && <p className="text-sm text-destructive">{failure}</p>}
-        <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3">
-          <DriveLogo size={28} className="mt-0.5 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">Save to Drive</p>
-            <p className="text-xs text-muted-foreground">Share with people by email, choose who can edit, and find it with all your files at drive.nyggis.com.</p>
-          </div>
-          <Button
-            size="sm"
-            onClick={() =>
-              saveToDrive().then(
-                () => { onOpenChange(false); toast.success("Saved to Drive", { description: "Use Share to add people." }) },
-                (e) => (e?.signedOut ? (location.href = drive.loginUrl()) : toast.error(e?.message ?? "Couldn't save to Drive")),
-              )
-            }
-          >
-            Save
-          </Button>
+        <div className="flex items-center gap-3 rounded-xl border bg-muted/40 p-3">
+          <DriveLogo size={28} className="shrink-0" />
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {signedOut ? "With a Nyggis account, your decks are kept in Drive and open from any device." : "You'll find it with all your files at drive.nyggis.com."}
+          </p>
         </div>
-        {roomId && (
-          <div className="flex gap-2">
-            <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} aria-label="Share link" />
-            <Button variant="outline" onClick={copy}>{copied ? <CheckIcon /> : <CopyIcon />} {copied ? "Copied" : "Copy"}</Button>
-          </div>
+        {linkRoom && (
+          <p className="text-sm text-muted-foreground">
+            This deck is also shared by an older link that anyone can edit. Saving it to Drive turns that link off.{" "}
+            <button className="font-medium text-foreground underline underline-offset-2" onClick={() => { void shareDeck(undefined); onOpenChange(false) }}>
+              Turn it off now
+            </button>
+          </p>
         )}
-        <Field>
-          <FieldLabel htmlFor="collab-name">Your name</FieldLabel>
-          <Input id="collab-name" value={name} onChange={(e) => useCollab.getState().setName(e.target.value)} placeholder="Shown next to your selection" />
-        </Field>
         <DialogFooter>
-          {roomId ? (
-            <Button variant="outline" onClick={() => { void shareDeck(undefined); onOpenChange(false) }}>Stop sharing</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          {signedOut ? (
+            <Button asChild><a href={drive.loginUrl()}>Sign in</a></Button>
           ) : (
-            <Button onClick={() => void shareDeck(newRoomId())}>Start sharing</Button>
+            <Button disabled={user.status === "loading" || saving} onClick={save}>{saving ? "Saving…" : "Save to Drive and share"}</Button>
           )}
         </DialogFooter>
       </DialogContent>
