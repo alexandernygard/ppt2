@@ -7,7 +7,8 @@
     "build": "pnpm --filter @ppt2/web build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "deploy": "pnpm build && wrangler deploy"
+    "deploy": "pnpm build && wrangler deploy",
+    "dev:worker": "pnpm --filter @ppt2/worker dev"
   },
   "devDependencies": {
     "wrangler": "^4.151.2"

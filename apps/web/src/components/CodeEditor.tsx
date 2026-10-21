@@ -93,7 +93,7 @@ export function CodeEditor() {
     return () => v.destroy()
   }, [])
 
-  // External changes (canvas, AI, undo): apply as a minimal diff and flash the changed lines.
+  // External changes (canvas, AI, undo, collaborators): apply as a minimal diff and flash the changed lines.
   const shown = aiSource ?? source
   useEffect(() => {
     const v = view.current
@@ -105,7 +105,8 @@ export function CodeEditor() {
     v.dispatch({
       changes: change,
       annotations: External.of(true),
-      effects: [setFlash.of({ from: change.from, to: Math.max(end, change.from + 1) }), ...(v.hasFocus ? [] : [EditorView.scrollIntoView(change.from, { y: "center" })])],
+      // Others' edits don't scroll the code away from what you're reading.
+      effects: [setFlash.of({ from: change.from, to: Math.max(end, change.from + 1) }), ...(v.hasFocus || useStore.getState().lastOrigin === "remote" ? [] : [EditorView.scrollIntoView(change.from, { y: "center" })])],
     })
     const t = setTimeout(() => v.dispatch({ effects: setFlash.of(null) }), 1200)
     return () => clearTimeout(t)

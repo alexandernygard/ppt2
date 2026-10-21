@@ -148,6 +148,21 @@ export async function addFonts(files: File[]): Promise<{ ref: string; family: st
   return out
 }
 
+/** Every asset stored with the open deck. */
+export async function deckAssets() {
+  return db.byDeck("assets", get().currentId)
+}
+
+/** Store an asset that arrived from a shared deck, under the name the source already uses. */
+export async function putAsset(name: string, blob: Blob, width?: number, height?: number) {
+  const deckId = get().currentId
+  await db.put("assets", { key: `${deckId}/${name}`, deckId, name, blob, width, height, createdAt: Date.now() })
+  const u = URL.createObjectURL(blob)
+  objectUrls.push(u)
+  addAssetUrl(name, u)
+  set({ assets: { ...get().assets, [name]: { width, height } } })
+}
+
 // --- saving & versions ------------------------------------------------------
 
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -290,6 +305,29 @@ export async function deleteDeck(id: string) {
     if (decks[0]) await activate(decks[0])
     else await createDeck()
   }
+}
+
+// --- sharing ----------------------------------------------------------------
+
+/** Share the open deck in a live room (or stop sharing it, with undefined). */
+export async function shareDeck(roomId: string | undefined) {
+  await flush()
+  const prev = await db.get("decks", get().currentId)
+  if (!prev) return
+  const rec = { ...prev, roomId }
+  await db.put("decks", rec)
+  set({ decks: get().decks.map((d) => (d.id === rec.id ? rec : d)) })
+}
+
+/** Open someone's shared deck from a link: the copy you already have, or a new one that fills in from the room. */
+export async function joinRoom(roomId: string) {
+  const existing = get().decks.find((d) => d.roomId === roomId)
+  if (existing) return openDeck(existing.id)
+  await flush()
+  const rec: DeckRecord = { ...record(""), title: "Shared deck", roomId }
+  await db.put("decks", rec)
+  upsertList(rec)
+  await activate(rec)
 }
 
 // --- files on disk ----------------------------------------------------------

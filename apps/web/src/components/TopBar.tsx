@@ -23,7 +23,7 @@ import {
   TooltipTrigger,
   toast,
 } from "@alexandernygard/components"
-import { CheckIcon, ChevronDownIcon, CloudAlertIcon, CodeIcon, Columns2Icon, FileIcon, FolderIcon, HardDriveIcon, HistoryIcon, LibraryIcon, LinkIcon, LoaderIcon, PlayIcon, PresentationIcon, Redo2Icon, SettingsIcon, StampIcon, Undo2Icon, ImageIcon, FileUpIcon, FilePlusIcon, FolderOpenIcon, SaveIcon, Unlink2Icon } from "lucide-react"
+import { CheckIcon, ChevronDownIcon, CloudAlertIcon, CodeIcon, Columns2Icon, FileIcon, FolderIcon, HardDriveIcon, HistoryIcon, LibraryIcon, LinkIcon, LoaderIcon, UsersIcon, PlayIcon, PresentationIcon, Redo2Icon, SettingsIcon, StampIcon, Undo2Icon, ImageIcon, FileUpIcon, FilePlusIcon, FolderOpenIcon, SaveIcon, Unlink2Icon } from "lucide-react"
 import { STARTER_DECK, themes } from "@ppt2/sdk"
 import { exportPptx } from "@ppt2/react"
 import { useStore, type View } from "../store"
@@ -32,6 +32,8 @@ import { createDeck, diskSupported, importText, openFile, openFolder, reconnect,
 import { DeckLibrary } from "./DeckLibrary"
 import { HistoryDialog } from "./HistoryDialog"
 import { BrandPanel } from "./BrandPanel"
+import { Peers, ShareDialog } from "./ShareDialog"
+import { useCollab } from "../collab"
 
 function SaveStatus() {
   const status = useLibrary((s) => s.status)
@@ -62,8 +64,15 @@ function SaveStatus() {
 export function TopBar({ onSettings }: { onSettings: () => void }) {
   const deck = useStore((s) => s.deck)
   const view = useStore((s) => s.view)
-  const canUndo = useStore((s) => s.past.length > 0)
-  const canRedo = useStore((s) => s.future.length > 0)
+  // While a deck is shared, undo is per person and lives in the collaboration session.
+  const shared = useCollab((s) => s.roomId != null)
+  const liveUndo = useCollab((s) => s.canUndo)
+  const liveRedo = useCollab((s) => s.canRedo)
+  const localUndo = useStore((s) => s.past.length > 0)
+  const localRedo = useStore((s) => s.future.length > 0)
+  const canUndo = shared ? liveUndo : localUndo
+  const canRedo = shared ? liveRedo : localRedo
+  const [sharing, setSharing] = useState(false)
   const st = useStore.getState
   const fileInput = useRef<HTMLInputElement>(null)
   const [library, setLibrary] = useState(false)
@@ -174,6 +183,10 @@ export function TopBar({ onSettings }: { onSettings: () => void }) {
       <input ref={fileInput} type="file" accept=".tsx,.jsx,.ts,.txt" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) await importText(await f.text()); e.target.value = "" }} />
       <DeckLibrary open={library} onOpenChange={setLibrary} onImport={() => fileInput.current?.click()} />
       <HistoryDialog open={history} onOpenChange={setHistory} />
+
+      <Peers />
+      <Button size="sm" variant={shared ? "secondary" : "ghost"} onClick={() => setSharing(true)}><UsersIcon /> Share</Button>
+      <ShareDialog open={sharing} onOpenChange={setSharing} />
 
       <Tooltip>
         <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" onClick={onSettings} aria-label="AI settings"><SettingsIcon /></Button></TooltipTrigger>

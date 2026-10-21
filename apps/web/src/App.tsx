@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, ResizableSidebar, ResizableSidebarProvider } from "@alexandernygard/components"
 import { AlertCircleIcon } from "lucide-react"
 import { useStore } from "./store"
@@ -11,6 +11,8 @@ import { RightSidebar } from "./components/RightSidebar"
 import { SettingsDialog } from "./components/SettingsDialog"
 import { RenderFarm } from "./components/RenderFarm"
 import { PresentOverlay } from "./components/PresentOverlay"
+import { useLibrary } from "./library"
+import { closeRoom, openRoom } from "./collab"
 
 function Diagnostics() {
   const errors = useStore((s) => s.errors)
@@ -51,6 +53,15 @@ function CanvasPane() {
 export function App() {
   const view = useStore((s) => s.view)
   const [settings, setSettings] = useState(false)
+  const deckId = useLibrary((s) => s.currentId)
+  const roomId = useLibrary((s) => s.decks.find((d) => d.id === s.currentId)?.roomId)
+
+  // A shared deck keeps a live room open while it is the open one.
+  useEffect(() => {
+    if (!roomId) return
+    openRoom(deckId, roomId)
+    return closeRoom
+  }, [deckId, roomId])
   return (
     <ResizableSidebarProvider>
       <div id="app-shell" className="flex h-full flex-col bg-background text-foreground">

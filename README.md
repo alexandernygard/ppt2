@@ -9,7 +9,16 @@ pnpm dev        # http://localhost:5291
 pnpm test       # SDK tests (compiler + source patches)
 ```
 
-Add your Anthropic API key under the gear icon. Everything runs in the browser; there is no server.
+Add your Anthropic API key under the gear icon. Decks live in your browser; the only server code is the optional live-collaboration Worker (below).
+
+### Sharing a deck live
+
+Share in the top bar makes the deck live: others open the link and edit together, seeing which slide each person is on and what they have selected. The deck source and its images and fonts sync through a Durable Object (`apps/worker`, built on `@alexandernygard/collab`); assets over 900 KB stay local. Undo is per person while a deck is shared. Anyone with the link can edit; there are no accounts yet.
+
+```bash
+pnpm dev:worker   # Worker + Durable Object on :8788 (vite proxies /collab to it)
+pnpm dev          # the app
+```
 
 ## Packages
 

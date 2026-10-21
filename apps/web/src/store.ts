@@ -38,7 +38,8 @@ import { paletteItem } from "./lib/palette"
 
 export type View = "split" | "canvas" | "code"
 export type SidebarTab = "assistant" | "layers" | "components"
-type Origin = "code" | "canvas" | "ai" | "history" | "load"
+/** "remote": a collaborator's edit, arriving from a shared deck (see collab.ts). */
+export type Origin = "code" | "canvas" | "ai" | "history" | "load" | "remote"
 
 interface State {
   source: string
@@ -126,6 +127,9 @@ function compiled(source: string) {
 
 let lastCodePush = 0
 
+/** Live collaboration replaces snapshot undo while a deck is shared (see collab.ts). */
+export const collabHooks: { undo?: () => void; redo?: () => void } = {}
+
 export const useStore = create<State>()((set, get) => ({
   source: initial,
   ...compiled(initial),
@@ -148,7 +152,8 @@ export const useStore = create<State>()((set, get) => ({
     const s = get()
     if (source === s.source) return
     // Coalesce typing into one undo step per pause; every other edit is its own step.
-    const push = origin !== "history" && (origin !== "code" || Date.now() - lastCodePush > 1200)
+    // A collaborator's edit is theirs to undo, not ours.
+    const push = origin !== "history" && origin !== "remote" && (origin !== "code" || Date.now() - lastCodePush > 1200)
     if (origin === "code") lastCodePush = Date.now()
     const c = compiled(source)
     const deck = c.deck ?? s.deck
@@ -157,7 +162,7 @@ export const useStore = create<State>()((set, get) => ({
       ...c,
       deck,
       past: push ? [...s.past.slice(-200), s.source] : s.past,
-      future: origin === "history" ? s.future : [],
+      future: origin === "history" || origin === "remote" ? s.future : [],
       lastOrigin: origin,
       revision: origin === "code" ? s.revision : s.revision + 1,
       current: Math.min(s.current, Math.max(0, (deck?.slides.length ?? 1) - 1)),
@@ -202,6 +207,7 @@ export const useStore = create<State>()((set, get) => ({
   },
 
   undo() {
+    if (collabHooks.undo) return collabHooks.undo()
     const { past, source, future } = get()
     if (!past.length) return
     const prev = past[past.length - 1]
@@ -209,6 +215,7 @@ export const useStore = create<State>()((set, get) => ({
     get().setSource(prev, "history")
   },
   redo() {
+    if (collabHooks.redo) return collabHooks.redo()
     const { future, source, past } = get()
     if (!future.length) return
     const [next, ...rest] = future

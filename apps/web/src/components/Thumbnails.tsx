@@ -13,6 +13,7 @@ import { PlusIcon } from "lucide-react"
 import { SlideView, Stage } from "@ppt2/react"
 import type { DeckModel, SlideNode } from "@ppt2/sdk"
 import { useStore, useVisibleDeck } from "../store"
+import { peersOn, useCollab } from "../collab"
 
 const Thumb = memo(function Thumb({ deck, slide }: { deck: DeckModel; slide: SlideNode }) {
   return (
@@ -28,6 +29,7 @@ export function Thumbnails() {
   const deck = useVisibleDeck()
   const current = useStore((s) => s.current)
   const aiBusy = useStore((s) => s.aiPreview != null)
+  const peers = useCollab((s) => s.peers)
   const st = useStore.getState
   const [drag, setDrag] = useState<{ from: number; over: number } | null>(null)
   const press = useRef<{ from: number; y: number; dragging: boolean } | null>(null)
@@ -72,7 +74,13 @@ export function Thumbnails() {
               >
                 {drag && drag.over === i && drag.from !== i && drag.from !== i - 1 && <div className="absolute -top-2 right-0 left-6 h-0.5 rounded bg-highlight" />}
                 {drag && i === deck.slides.length - 1 && drag.over === i + 1 && drag.from !== i && <div className="absolute right-0 -bottom-2 left-6 h-0.5 rounded bg-highlight" />}
-                <span className={cn("w-4 shrink-0 pt-0.5 text-right text-xs tabular-nums text-muted-foreground", i === current && "font-semibold text-foreground")}>{i + 1}</span>
+                <div className="flex w-4 shrink-0 flex-col items-end gap-1 pt-0.5">
+                  <span className={cn("text-xs tabular-nums text-muted-foreground", i === current && "font-semibold text-foreground")}>{i + 1}</span>
+                  {/* Who else is on this slide. */}
+                  {peersOn(peers, i, null).slice(0, 3).map((p) => (
+                    <span key={p.clientId} title={p.state.user.name} className="size-2.5 rounded-full ring-2 ring-background" style={{ background: p.state.user.color }} />
+                  ))}
+                </div>
                 <div className={cn("min-w-0 flex-1 rounded-lg ring-1 ring-border transition", i === current ? "ring-2 ring-highlight" : "group-hover:ring-foreground/30", drag?.from === i && "opacity-40")}>
                   <Thumb deck={deck} slide={slide} />
                 </div>

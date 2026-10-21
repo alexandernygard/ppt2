@@ -24,6 +24,7 @@ import { layouts } from "@ppt2/sdk"
 import { useStore, useVisibleDeck } from "../store"
 import { componentSlide } from "../lib/tree"
 import { PALETTE } from "../lib/palette"
+import { peersOn, useCollab } from "../collab"
 
 const MENU_GROUPS = ["Text", "Media", "Layout", "Diagrams", "Data", "Component"] as const
 
@@ -37,6 +38,7 @@ export function Canvas() {
   const editing = useStore((s) => s.editingComponent)
   const dragging = useStore((s) => s.dragging != null)
   const hovered = useStore((s) => s.hovered)
+  const peers = useCollab((s) => s.peers)
   const slide = deck && (editing ? componentSlide(deck, editing) : deck.slides[current])
   const def = editing ? deck?.components.find((c) => c.name === editing) : undefined
   const upload = useRef<HTMLInputElement>(null)
@@ -223,6 +225,7 @@ export function Canvas() {
               canDrop={(p) => st().canDropHere(p)}
               onDropElement={(t) => st().dropAt(t)}
               highlight={hovered}
+              peers={peersOn(peers, current, editing).flatMap((p) => (p.state.selected ? [{ path: p.state.selected, name: p.state.user.name, color: p.state.user.color }] : []))}
               fixed={!!editing}
             />
           </div>

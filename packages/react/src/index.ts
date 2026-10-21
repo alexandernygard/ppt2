@@ -1,6 +1,6 @@
 export { SlideView, brandOf, type SlideViewProps } from "./SlideView"
 export { Stage, FixedStage, useStage, StageContext } from "./Stage"
-export { EditableSlide, findElement, type EditableSlideProps, type TextField, type DropTarget } from "./EditableSlide"
+export { EditableSlide, findElement, type EditableSlideProps, type SlidePeer, type TextField, type DropTarget } from "./EditableSlide"
 export { Presenter, maxStep, type PresenterProps } from "./Presenter"
 export { ElementView, RenderContext, type RenderOptions, type Box, type Override } from "./elements"
 export { setAssetUrls, addAssetUrl, resolveSrc, isAssetRef, registerFonts } from "./assets"

@@ -36,7 +36,11 @@ export interface EditableSlideProps {
   highlight?: string | null
   /** No moving or resizing: for a component's definition, whose root has no position of its own. */
   fixed?: boolean
+  /** What collaborators have selected on this slide, outlined in their colour. */
+  peers?: SlidePeer[]
 }
+
+export interface SlidePeer { path: string; name: string; color: string }
 
 export interface DropTarget { parent: string | null; index: number; x: number; y: number }
 
@@ -60,7 +64,7 @@ const parseFocus = (f: unknown): [number, number] => {
   return m ? [+m[1], +m[2]] : [50, 50]
 }
 
-export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, onChangeText, onChangeProps, cropping, onCrop, onDropFiles, dragging, canDrop, onDropElement, highlight, fixed }: EditableSlideProps) {
+export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, onChangeText, onChangeProps, cropping, onCrop, onDropFiles, dragging, canDrop, onDropElement, highlight, fixed, peers }: EditableSlideProps) {
   const { scale } = useStage()
   const root = useRef<HTMLDivElement>(null)
   const [rects, setRects] = useState<Record<string, Rect>>({})
@@ -88,7 +92,7 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
   // Keep selection/hover rects in sync with whatever was rendered.
   useLayoutEffect(() => {
     const next: Record<string, Rect> = {}
-    for (const p of [selected, hover, highlight]) if (p) { const r = measure(p); if (r) next[p] = r }
+    for (const p of [selected, hover, highlight, ...(peers ?? []).map((x) => x.path)]) if (p) { const r = measure(p); if (r) next[p] = r }
     setRects((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
   })
   useLayoutEffect(() => {
@@ -373,6 +377,19 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
       hidden={editing ? new Set([editing.path]) : undefined}
       style={{ cursor: crop.current ? "grabbing" : cropping ? "move" : gesture.current?.moved ? "grabbing" : "default", touchAction: "none" }}
     >
+      {peers?.map((p, i) => {
+        const r = rects[p.path]
+        if (!r) return null
+        // Name tags go under the box, so they don't cover your own selection's label above it,
+        // unless the box reaches the bottom of the slide.
+        const tag = 20 / scale
+        const below = r.y + r.h + tag < deck.height
+        return (
+          <div key={`${p.path}-${i}`} style={{ position: "absolute", left: r.x, top: r.y, width: r.w, height: r.h, outline: `${line}px solid ${p.color}`, outlineOffset: line * (1 + i), pointerEvents: "none", zIndex: 19 }}>
+            <div style={{ position: "absolute", top: below ? r.h + line * (2 + i) + 2 / scale : -tag - line * (2 + i), left: 0, fontSize: 11 / scale, color: "#fff", background: p.color, padding: `${1 / scale}px ${5 / scale}px`, borderRadius: 3 / scale, whiteSpace: "nowrap", fontFamily: "system-ui" }}>{p.name}</div>
+          </div>
+        )
+      })}
       {hov && !gesture.current && <div style={{ position: "absolute", left: hov.x, top: hov.y, width: hov.w, height: hov.h, outline: `${line}px dashed ${hovEl?.instance || hovEl?.component ? COMPONENT_COLOR : "rgba(242,169,34,.7)"}`, pointerEvents: "none", zIndex: 20 }} />}
       {insertAt && dragging && (
         <>

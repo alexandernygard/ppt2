@@ -8,6 +8,8 @@ export interface DeckRecord {
   slides: number
   createdAt: number
   updatedAt: number
+  /** Set while the deck is shared: the id of its live-collaboration room. */
+  roomId?: string
 }
 
 export interface VersionRecord {
