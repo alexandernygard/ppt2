@@ -36,6 +36,6 @@
     "react-dom": "^19.3.1",
     "yjs": "^13.6.33",
     "zustand": "^5.0.15",
-    "@alexandernygard/drive": "link:../../../drive/packages/drive"
+    "@alexandernygard/drive": "^0.1.0"
   }
 }
