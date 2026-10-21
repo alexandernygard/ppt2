@@ -17,11 +17,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@alexandernygard/components"
-import { CopyIcon, ImageIcon, PlusIcon, ShapesIcon, Trash2Icon, TypeIcon, UndoDotIcon, BarChart3Icon, ListIcon, HashIcon, QuoteIcon, CodeIcon, HeadingIcon, CropIcon, UploadIcon, SmileIcon, WorkflowIcon, MilestoneIcon, NetworkIcon, RefreshCwIcon, ReplaceIcon } from "lucide-react"
+import { ComponentIcon, CopyIcon, ImageIcon, PlusIcon, Trash2Icon, UndoDotIcon, CropIcon, UploadIcon, ReplaceIcon } from "lucide-react"
 import { IconPicker } from "./IconPicker"
 import { EditableSlide, Stage, findElement } from "@ppt2/react"
 import { layouts } from "@ppt2/sdk"
 import { useStore, useVisibleDeck } from "../store"
+import { componentSlide } from "../lib/tree"
+import { PALETTE } from "../lib/palette"
+
+const MENU_GROUPS = ["Text", "Media", "Layout", "Diagrams", "Data", "Component"] as const
 
 export function Canvas() {
   const deck = useVisibleDeck()
@@ -30,7 +34,11 @@ export function Canvas() {
   const aiBusy = useStore((s) => s.aiPreview != null)
   const st = useStore.getState
   const cropping = useStore((s) => s.cropping)
-  const slide = deck?.slides[current]
+  const editing = useStore((s) => s.editingComponent)
+  const dragging = useStore((s) => s.dragging != null)
+  const hovered = useStore((s) => s.hovered)
+  const slide = deck && (editing ? componentSlide(deck, editing) : deck.slides[current])
+  const def = editing ? deck?.components.find((c) => c.name === editing) : undefined
   const upload = useRef<HTMLInputElement>(null)
   const replaceTarget = useRef<string | null>(null)
   const [iconPicker, setIconPicker] = useState<"insert" | "replace" | null>(null)
@@ -61,7 +69,7 @@ export function Canvas() {
       if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); s.selected ? s.duplicateSelected() : s.duplicateSlide(s.current); return }
       if (e.key === "Escape" || (e.key === "Enter" && s.cropping)) { if (s.cropping) s.setCropping(null); else s.select(null); return }
       if ((e.key === "Delete" || e.key === "Backspace") && s.selected) { e.preventDefault(); s.deleteElement(s.selected); return }
-      if (e.key.startsWith("Arrow")) {
+      if (e.key.startsWith("Arrow") && !s.editingComponent) {
         const sl = s.deck?.slides[s.current]
         const el = s.selected && sl ? findElement(sl.elements, s.selected) : undefined
         if (el && (el.props.x != null || el.props.y != null)) {
@@ -80,6 +88,16 @@ export function Canvas() {
     return () => window.removeEventListener("keydown", onKey)
   }, [st])
 
+  if (editing && deck && !slide) {
+    return (
+      <div className="grid h-full place-items-center text-center text-sm text-muted-foreground">
+        <div className="flex flex-col items-center gap-3">
+          <p>The component {editing} isn't in the code any more.</p>
+          <Button size="sm" variant="outline" onClick={() => st().editComponent(null)}>Back to the slides</Button>
+        </div>
+      </div>
+    )
+  }
   if (!deck || !slide) return <div className="grid h-full place-items-center text-muted-foreground">No slides yet. Ask the AI to write a deck, or add one in code.</div>
   const el = selected ? findElement(slide.elements, selected) : undefined
   const pinned = el && (el.props.x != null || el.props.y != null)
@@ -87,6 +105,13 @@ export function Canvas() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-1.5 overflow-x-auto border-b px-3 whitespace-nowrap [&>*]:shrink-0">
+        {editing ? (
+          <>
+            <span className="flex items-center gap-1.5 rounded-md bg-violet-500/10 px-2 py-1 text-xs font-medium text-violet-700 dark:text-violet-300"><ComponentIcon className="size-3.5" /> {editing}</span>
+            <span className="text-xs text-muted-foreground">{def?.uses === 1 ? "1 use" : `${def?.uses ?? 0} uses`} · edits change every use</span>
+            <Button size="sm" variant="outline" onClick={() => st().editComponent(null)}>Done</Button>
+          </>
+        ) : <>
         <Select value={slide.layout} onValueChange={(layout) => st().setSlideProps(current, { layout })} disabled={aiBusy}>
           <SelectTrigger size="sm" className="w-36"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -107,32 +132,36 @@ export function Canvas() {
             {["none", "fade", "slide", "zoom"].map((t) => <SelectItem key={t} value={t}>{t === "none" ? "No transition" : t}</SelectItem>)}
           </SelectContent>
         </Select>
+        </>}
         <Separator orientation="vertical" className="mx-1 h-5!" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" disabled={aiBusy}><PlusIcon /> Insert</Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {([["title", "Title", HeadingIcon], ["text", "Text", TypeIcon], ["list", "Bullets", ListIcon], ["stat", "Big number", HashIcon], ["quote", "Quote", QuoteIcon]] as const).map(([t, label, Icon]) => (
-              <DropdownMenuItem key={t} onSelect={() => st().addElement(t)}><Icon /> {label}</DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
+          <DropdownMenuContent align="start" className="max-h-[70vh] overflow-y-auto">
             <DropdownMenuItem onSelect={() => { replaceTarget.current = null; upload.current?.click() }}><UploadIcon /> Image from computer…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => st().addElement("image")}><ImageIcon /> Placeholder image</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setIconPicker("insert")}><SmileIcon /> Icon…</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs">Diagrams</DropdownMenuLabel>
-            {([["flow", "Process flow", WorkflowIcon], ["timeline", "Timeline", MilestoneIcon], ["tree", "Org chart", NetworkIcon], ["cycle", "Cycle", RefreshCwIcon]] as const).map(([t, label, Icon]) => (
-              <DropdownMenuItem key={t} onSelect={() => st().addElement(t)}><Icon /> {label}</DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            {([["chart", "Chart", BarChart3Icon], ["shape", "Shape", ShapesIcon], ["code", "Code", CodeIcon]] as const).map(([t, label, Icon]) => (
-              <DropdownMenuItem key={t} onSelect={() => st().addElement(t)}><Icon /> {label}</DropdownMenuItem>
-            ))}
+            {MENU_GROUPS.map((group) => {
+              const items = PALETTE.filter((p) => p.group === group && (p.type !== "slot" || editing) && p.type !== "step" && p.type !== "node")
+              if (!items.length) return null
+              return (
+                <div key={group}>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs">{group}</DropdownMenuLabel>
+                  {items.map((p) => (
+                    <DropdownMenuItem key={p.type} onSelect={() => (p.type === "icon" ? setIconPicker("insert") : st().addElement(p.type))}>
+                      <p.icon /> {p.type === "icon" ? "Icon…" : p.type === "image" ? "Placeholder image" : p.label}
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              )
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
         {el && (
           <>
             <Separator orientation="vertical" className="mx-1 h-5!" />
-            <span className="text-xs text-muted-foreground">{el.type}{pinned ? " · pinned" : " · in layout"}</span>
+            <span className="text-xs text-muted-foreground">{el.instance ? `◇ ${el.instance.name}` : el.type}{el.component && el.component !== editing ? ` · part of ${el.component}` : ""}{editing ? "" : pinned ? " · pinned" : " · in layout"}</span>
+            {el.instance && (
+              <Button size="sm" variant="ghost" onClick={() => st().editComponent(el.instance!.name)}><ComponentIcon /> Edit component</Button>
+            )}
             {el.type === "image" && (
               <>
                 <Tooltip>
@@ -189,7 +218,12 @@ export function Canvas() {
               onChangeProps={(p, props) => st().setElementProps(p, props)}
               cropping={cropping}
               onCrop={(p) => st().setCropping(p)}
-              onDropFiles={(files, at) => void st().insertImages(files, at)}
+              onDropFiles={editing ? undefined : (files, at) => void st().insertImages(files, at)}
+              dragging={dragging}
+              canDrop={(p) => st().canDropHere(p)}
+              onDropElement={(t) => st().dropAt(t)}
+              highlight={hovered}
+              fixed={!!editing}
             />
           </div>
         </Stage>

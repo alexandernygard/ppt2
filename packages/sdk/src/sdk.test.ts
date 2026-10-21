@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { compile } from "./compile"
-import { setProps, setThemeProps, setText, moveSlide, insertSlide, removeSlide, duplicateSlide, insertElement, removeElement, applyEdits, PatchError, elementCode, replaceSlide } from "./patch"
+import { setProps, setThemeProps, setText, moveSlide, insertSlide, removeSlide, duplicateSlide, insertElement, removeElement, applyEdits, PatchError, elementCode, replaceSlide, moveElement, defineComponent, componentFromElement, renameComponent, removeComponent, componentName } from "./patch"
 import { STARTER_DECK } from "./starter"
 import { lintDeck, outline, assetRefs } from "./outline"
 
@@ -371,5 +371,180 @@ export default (
       const fn = one(`theme={makeTheme()}`).replace("export", "const makeTheme = () => \"snow\"\nexport")
       expect(() => setThemeProps(fn, deckOf(fn), { footer: "c" })).toThrow(PatchError)
     })
+  })
+})
+
+describe("components", () => {
+  const COMP = `import { Deck, Slide, Title, Text, Card, Icon, Row, Slot, component } from "ppt2"
+
+const Callout = component(
+  <Card background="surface">
+    <Icon name="lightbulb" />
+    <Slot />
+  </Card>
+)
+
+const Pair = component(
+  <Row>
+    <Callout>
+      <Title>Left</Title>
+      <Slot />
+    </Callout>
+  </Row>
+)
+
+export default (
+  <Deck title="Components">
+    <Slide>
+      <Title>One</Title>
+      <Callout x={100} y={200}>
+        <Text>First</Text>
+        <Text>Second</Text>
+      </Callout>
+      <Callout />
+    </Slide>
+    <Slide>
+      <Pair>
+        <Text>Inner</Text>
+      </Pair>
+    </Slide>
+  </Deck>
+)
+`
+
+  it("expands instances: template parts, slot children and instance props", () => {
+    const deck = must(COMP)
+    const [, inst] = deck.slides[0].elements
+    expect(inst.type).toBe("card")
+    expect(inst.props).toMatchObject({ background: "surface", x: 100, y: 200 })
+    expect(inst.instance).toMatchObject({ name: "Callout", src: COMP.indexOf("<Callout x") , slot: { path: "0/1", index: 1, count: 2 } })
+    expect(inst.component).toBeUndefined()
+    expect(inst.children!.map((c) => [c.type, c.component, c.text])).toEqual([["icon", "Callout", undefined], ["text", undefined, "First"], ["text", undefined, "Second"]])
+    // Template parts point into the definition, so editing them edits every use.
+    expect(inst.children![0].src).toBe(COMP.indexOf("<Icon"))
+    expect(deck.slides[0].elements[2].children).toHaveLength(1)
+  })
+
+  it("lists components with their definition and use count", () => {
+    const deck = must(COMP)
+    expect(deck.components.map((c) => [c.name, c.uses])).toEqual([["Callout", 3], ["Pair", 1]])
+    const t = deck.components[0].template!
+    expect(t.path).toBe("c/0")
+    expect(t.children!.map((c) => c.type)).toEqual(["icon", "slot"])
+    expect(t.children![1].src).toBe(COMP.indexOf("<Slot"))
+  })
+
+  it("nests components: inner slot content belongs to the outer component", () => {
+    const deck = must(COMP)
+    const pair = deck.slides[1].elements[0]
+    expect(pair.instance?.name).toBe("Pair")
+    const callout = pair.children![0]
+    expect(callout.instance?.name).toBe("Callout")
+    expect(callout.component).toBe("Pair")
+    expect(callout.children!.map((c) => [c.type, c.component, c.text])).toEqual([["icon", "Callout", undefined], ["title", "Pair", "Left"], ["text", undefined, "Inner"]])
+    expect(pair.instance?.slot).toEqual({ path: "1/0/0", index: 2, count: 1 })
+  })
+
+  it("warns about a <Slot /> outside a component and children without a slot", () => {
+    const r = compile(`import { Deck, Slide, Text, Slot, component } from "ppt2"
+const Badge = component(<Text>Badge</Text>)
+export default <Deck><Slide><Slot /><Badge><Text>lost</Text></Badge></Slide></Deck>`)
+    expect(r.warnings.map((w) => w.message).join("\n")).toMatch(/only works inside a component[\s\S]*has no <Slot \/>/)
+  })
+
+  it("edits the definition through a template part's src", () => {
+    const deck = must(COMP)
+    const icon = deck.slides[0].elements[1].children![0]
+    const out = setProps(COMP, icon.src!, { name: "rocket" }).source
+    const next = must(out)
+    expect(next.slides[0].elements[1].children![0].props.name).toBe("rocket")
+    expect(next.slides[0].elements[2].children![0].props.name).toBe("rocket")
+  })
+
+  it("defines, creates from an element, renames and removes components", () => {
+    const base = `import { Deck, Slide, Title, Card, Text, component } from "ppt2"
+
+export default (
+  <Deck>
+    <Slide>
+      <Title>Hi</Title>
+      <Card x={10} y={20} gap={8}>
+        <Text>Body</Text>
+      </Card>
+    </Slide>
+  </Deck>
+)
+`
+    expect(componentName("price card!")).toBe("PriceCard")
+    const defined = defineComponent(base, "Badge", "<Text>New</Text>").source
+    expect(defined).toContain("const Badge = component(\n  <Text>New</Text>\n)\n\nexport default")
+    expect(must(defined).components.map((c) => c.name)).toEqual(["Badge"])
+    expect(() => defineComponent(defined, "Badge", "<Text />")).toThrow(PatchError)
+    expect(() => defineComponent(defined, "Title", "<Text />")).toThrow(PatchError)
+
+    const deck = must(defined)
+    const made = componentFromElement(defined, deck.slides[0].elements[1].src!, "Panel", { slot: true }).source
+    expect(made).toContain(`const Panel = component(
+  <Card gap={8}>
+    <Text>Body</Text>
+    <Slot />
+  </Card>
+)`)
+    expect(made).toContain(`<Panel x={10} y={20} />`)
+    const after = must(made)
+    expect(after.slides[0].elements[1].instance?.name).toBe("Panel")
+    expect(after.slides[0].elements[1].props).toMatchObject({ x: 10, y: 20, gap: 8 })
+
+    const renamed = renameComponent(made, "Panel", "Box").source
+    expect(renamed).toContain("const Box = component(")
+    expect(renamed).toContain("<Box x={10} y={20} />")
+    expect(must(renamed).components.map((c) => c.name)).toEqual(["Badge", "Box"])
+
+    expect(() => removeComponent(renamed, "Box")).toThrow(PatchError)
+    const removed = removeComponent(renamed, "Badge").source
+    expect(removed).not.toContain("Badge")
+    expect(must(removed).components.map((c) => c.name)).toEqual(["Box"])
+  })
+})
+
+describe("moving elements", () => {
+  const src = `import { Deck, Slide, Title, Text, Row } from "ppt2"
+export default (
+  <Deck>
+    <Slide>
+      <Title>T</Title>
+      <Text>A</Text>
+      <Row>
+        <Text>B</Text>
+        <Text>C</Text>
+      </Row>
+      <Notes>n</Notes>
+    </Slide>
+  </Deck>
+)
+`
+  const texts = (s: string) => {
+    const els = must(s).slides[0].elements
+    return els.map((e) => e.children ? `[${e.children.map((c) => c.text).join(",")}]` : e.text).join(" ")
+  }
+
+  it("inserts at an index", () => {
+    const deck = must(src)
+    expect(texts(insertElement(src, deck.slides[0].src!, "<Text>X</Text>", 1).source)).toBe("T X A [B,C]")
+    expect(texts(insertElement(src, deck.slides[0].elements[2].src!, "<Text>X</Text>", 0).source)).toBe("T A [X,B,C]")
+  })
+
+  it("reorders within a parent and moves between parents", () => {
+    const deck = must(src)
+    const slide = deck.slides[0].src!
+    const [title, a, row] = deck.slides[0].elements
+    expect(texts(moveElement(src, title.src!, slide, 2).source)).toBe("A T [B,C]")
+    expect(texts(moveElement(src, title.src!, slide).source)).toBe("A [B,C] T")
+    expect(texts(moveElement(src, a.src!, row.src!, 1).source)).toBe("T [B,A,C]")
+    expect(texts(moveElement(src, row.children![1].src!, slide, 0).source)).toBe("C T A [B]")
+    expect(moveElement(src, a.src!, slide, 1).source).toBe(src)
+    expect(() => moveElement(src, row.src!, row.children![0].src!, 0)).toThrow(PatchError)
+    // Notes stay last.
+    expect(moveElement(src, title.src!, slide).source).toMatch(/<Title>T<\/Title>\n      <Notes>/)
   })
 })

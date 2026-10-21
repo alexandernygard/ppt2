@@ -10,6 +10,7 @@ import type {
   Transition,
   Aspect,
 } from "./types"
+import { define, type ComponentInfo } from "./registry"
 
 export interface PNode {
   $$ppt2: true
@@ -17,6 +18,8 @@ export interface PNode {
   props: Record<string, any>
   children: Child[]
   src?: number
+  /** Instances of a component(…): the definition. */
+  component?: ComponentInfo
 }
 export type Child = PNode | string | number
 type Children = unknown
@@ -28,6 +31,9 @@ export const Fragment = "fragment"
 
 export function h(type: unknown, props: Record<string, any> | null, ...children: unknown[]): any {
   const { __src, ...rest } = props ?? {}
+  if (typeof type === "function" && (type as ComponentFn).__component) {
+    return { $$ppt2: true, type: "instance", props: rest, children: flatten(children), src: __src, component: (type as ComponentFn).__component } satisfies PNode
+  }
   if (typeof type === "function") {
     const kids = flatten(children)
     return type({ ...rest, children: kids.length <= 1 ? kids[0] : kids })
@@ -148,12 +154,39 @@ export const Cycle = tag<DiagramProps>("cycle")
 export const Step = tag<StepProps>("step")
 export const Node = tag<NodeProps>("node")
 
+export const Slot = tag<{}>("slot")
+
+export type ComponentFn = Component<BaseProps> & { __component: ComponentInfo }
+
+/**
+ * A reusable component. Every use renders the template, with the instance's
+ * children in place of <Slot />. Props on the instance (x, y, w, h, step…)
+ * apply to the template's root element.
+ *
+ *   const Callout = component(
+ *     <Card>
+ *       <Icon name="lightbulb" />
+ *       <Slot />
+ *     </Card>
+ *   )
+ */
+export function component(template: unknown, options?: { description?: string }, meta?: { name: string; src: number }): ComponentFn {
+  const info: ComponentInfo = { name: meta?.name ?? "Component", src: meta?.src, template: flatten([template]), description: options?.description }
+  define(info)
+  const fn = ((props: Record<string, unknown> & { children?: unknown }) => {
+    const { children, ...rest } = props ?? {}
+    return { $$ppt2: true, type: "instance", props: rest, children: flatten([children]), component: info } satisfies PNode
+  }) as ComponentFn
+  fn.__component = info
+  return fn
+}
+
 /** Tag name in source for each element type. */
 export const TAGS: Record<string, string> = {
   deck: "Deck", slide: "Slide", notes: "Notes", title: "Title", subtitle: "Subtitle", text: "Text",
   list: "List", image: "Image", shape: "Shape", chart: "Chart", table: "Table", code: "Code",
   stat: "Stat", quote: "Quote", row: "Row", column: "Column", card: "Card", icon: "Icon",
-  flow: "Flow", tree: "Tree", timeline: "Timeline", cycle: "Cycle", step: "Step", node: "Node",
+  flow: "Flow", tree: "Tree", timeline: "Timeline", cycle: "Cycle", step: "Step", node: "Node", slot: "Slot",
 }
 
 /** Parse CSV text into rows of objects. Numeric cells become numbers. */

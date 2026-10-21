@@ -109,6 +109,24 @@ const brand = {
 - <Slide master={false}> hides the master elements, logo, footer and number on one slide.
 When a deck has a brand kit, use its layouts and colors rather than inventing new styling.
 
+## Components (reusable parts)
+Define a component once and use it on any slide. Its children go where <Slot /> is:
+\`\`\`tsx
+import { component, Slot } from "ppt2"
+const Callout = component(
+  <Card background="surface">
+    <Icon name="lightbulb" />
+    <Slot />
+  </Card>
+)
+// on a slide:
+<Callout><Text>Ship on Fridays</Text></Callout>
+\`\`\`
+- Declare components at the top level with const, before export default. One root element per component.
+- Props on a use (x, y, w, h, slot, step, animate…) apply to the root element.
+- Editing the definition changes every use. When the deck has components, reuse them instead of copying
+  their elements onto slides, and make a component when the same group of elements repeats.
+
 ## Data
 \`csv\` turns CSV text into rows: const sales = csv\`month,revenue\\nJan,12\\nFeb,18\`
 Then <Chart data={sales} category="month" series="revenue" />.

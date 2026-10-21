@@ -1,5 +1,6 @@
 import { useRef, useState } from "react"
 import {
+  ResizableSidebarTrigger,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -186,6 +187,10 @@ export function TopBar({ onSettings }: { onSettings: () => void }) {
           <DropdownMenuItem onSelect={() => st().present({ speaker: true })}><PresentationIcon /> Speaker view</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger asChild><ResizableSidebarTrigger sidebar="assistant" side="end" /></TooltipTrigger>
+        <TooltipContent>Show or hide the sidebar (⌥⌘B)</TooltipContent>
+      </Tooltip>
     </header>
   )
 }

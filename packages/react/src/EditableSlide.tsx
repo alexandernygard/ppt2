@@ -3,6 +3,7 @@ import type { DeckModel, ElementNode, SlideNode } from "@ppt2/sdk"
 import { SlideView } from "./SlideView"
 import { useStage } from "./Stage"
 import type { Box, Override } from "./elements"
+import { isAbsolute as isAbs } from "@ppt2/sdk"
 
 type Rect = { x: number; y: number; w: number; h: number }
 type Handle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw"
@@ -25,7 +26,21 @@ export interface EditableSlideProps {
   onCrop?: (path: string | null) => void
   /** Files dropped on the slide; `path` is the image under the pointer, if any. */
   onDropFiles?: (files: File[], at: { x: number; y: number; path?: string }) => void
+  /** An element from the palette or the layers tree is being dragged. */
+  dragging?: boolean
+  /** Whether the dragged element may go into this container (null = the slide itself). */
+  canDrop?: (parent: string | null) => boolean
+  /** The dragged element was dropped: into `parent` (null = the slide) before its `index`-th child, at slide point x/y. */
+  onDropElement?: (target: DropTarget) => void
+  /** Outline an element hovered elsewhere (the layers tree). */
+  highlight?: string | null
+  /** No moving or resizing: for a component's definition, whose root has no position of its own. */
+  fixed?: boolean
 }
+
+export interface DropTarget { parent: string | null; index: number; x: number; y: number }
+
+const COMPONENT_COLOR = "#8b5cf6"
 
 const TEXTISH = new Set(["title", "subtitle", "text", "list", "quote", "stat", "code"])
 const EDITABLE: Record<string, TextField> = { title: "text", subtitle: "text", text: "text", quote: "text", shape: "text", code: "text", notes: "text", list: "items", stat: "value", step: "text", node: "text" }
@@ -45,7 +60,7 @@ const parseFocus = (f: unknown): [number, number] => {
   return m ? [+m[1], +m[2]] : [50, 50]
 }
 
-export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, onChangeText, onChangeProps, cropping, onCrop, onDropFiles }: EditableSlideProps) {
+export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, onChangeText, onChangeProps, cropping, onCrop, onDropFiles, dragging, canDrop, onDropElement, highlight, fixed }: EditableSlideProps) {
   const { scale } = useStage()
   const root = useRef<HTMLDivElement>(null)
   const [rects, setRects] = useState<Record<string, Rect>>({})
@@ -54,6 +69,7 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
   const cropLive = useRef<{ focus: [number, number]; zoom: number } | null>(null)
   const wheelTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [dropAt, setDropAt] = useState<string | null>(null)
+  const [insertAt, setInsertAt] = useState<(DropTarget & { line?: Rect; box?: Rect }) | null>(null)
   const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] })
   const [editing, setEditing] = useState<{ path: string; field: TextField; value: string; rect: Rect; style: CSSProperties } | null>(null)
   const [hover, setHover] = useState<string | null>(null)
@@ -72,7 +88,7 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
   // Keep selection/hover rects in sync with whatever was rendered.
   useLayoutEffect(() => {
     const next: Record<string, Rect> = {}
-    for (const p of [selected, hover]) if (p) { const r = measure(p); if (r) next[p] = r }
+    for (const p of [selected, hover, highlight]) if (p) { const r = measure(p); if (r) next[p] = r }
     setRects((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
   })
   useLayoutEffect(() => {
@@ -195,7 +211,7 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
     const top = topLevel(chain[chain.length - 1])
     const keep = selected && chain.includes(selected) ? selected : top
     if (keep !== selected) onSelect(keep)
-    if (keep === top) begin(e, "move", top)
+    if (keep === top && !fixed) begin(e, "move", top)
   }
 
   function onPointerMove(e: RPointerEvent) {
@@ -274,11 +290,38 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
   }
 
   const sel = selected ? rects[selected] : undefined
-  const hov = hover && hover !== selected ? rects[hover] : undefined
+  const hovPath = highlight ?? hover
+  const hov = hovPath && hovPath !== selected ? rects[hovPath] : undefined
+  const hovEl = hovPath ? findElement(slide.elements, hovPath) : undefined
   const line = 2 / Math.max(scale, 0.05)
   const handleSize = 12 / Math.max(scale, 0.05)
   const selEl = selected ? findElement(slide.elements, selected) : undefined
-  const canResize = !!selEl && selected === topLevel(selected!)
+  const canResize = !!selEl && selected === topLevel(selected!) && !fixed
+  const selColor = selEl?.instance || selEl?.component ? COMPONENT_COLOR : "#f2a922"
+
+  /** Where a dragged element would land: the innermost container that takes it, else the slide's flow. */
+  function dropTarget(e: { clientX: number; clientY: number }): (DropTarget & { line?: Rect; box?: Rect }) | null {
+    const p = toStage(e)
+    const chain = pathsAt(document.elementFromPoint(e.clientX, e.clientY))
+    const parent = [...chain].reverse().find((c) => findElement(slide.elements, c)?.children && canDrop?.(c)) ?? null
+    if (parent == null && !canDrop?.(null)) return null
+    const box = parent ? measure(parent) : undefined
+    const container = parent ? findElement(slide.elements, parent)! : undefined
+    const row = container?.type === "row" || (container?.type === "flow" && container.props.direction !== "down") || container?.type === "timeline"
+    const kids = (container ? container.children! : slide.elements.filter((k) => !isAbs(k))).map((k) => ({ k, r: measure(k.path) })).filter((k) => k.r)
+    const hit = kids.find(({ r }) => (row ? p.x < r!.x + r!.w / 2 : p.y < r!.y + r!.h / 2))
+    const all = container ? container.children! : slide.elements
+    const index = hit ? all.indexOf(hit.k) : all.length
+    const ref = hit?.r ?? kids[kids.length - 1]?.r
+    let line: Rect | undefined
+    if (ref) {
+      const after = !hit
+      line = row
+        ? { x: after ? ref.x + ref.w : ref.x, y: ref.y, w: 0, h: ref.h }
+        : { x: ref.x, y: after ? ref.y + ref.h : ref.y, w: ref.w, h: 0 }
+    }
+    return { parent, index, x: Math.round(p.x), y: Math.round(p.y), line, box }
+  }
 
   const fileDrag = (e: React.DragEvent) => [...e.dataTransfer.types].includes("Files")
   const imageAt = (e: { clientX: number; clientY: number }) => [...pathsAt(document.elementFromPoint(e.clientX, e.clientY))].reverse().find((p) => findElement(slide.elements, p)?.type === "image")
@@ -286,10 +329,27 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
 
   return (
     <div
-      onDragOver={(e) => { if (!onDropFiles || !fileDrag(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; const p = imageAt(e) ?? "slide"; if (p !== dropAt) setDropAt(p) }}
-      onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDropAt(null) }}
+      onDragOver={(e) => {
+        if (dragging && onDropElement) {
+          const t = dropTarget(e)
+          if (!t) { setInsertAt(null); return }
+          e.preventDefault()
+          e.dataTransfer.dropEffect = "move"
+          setInsertAt((prev) => (prev && prev.parent === t.parent && prev.index === t.index && JSON.stringify(prev.line) === JSON.stringify(t.line) ? { ...prev, x: t.x, y: t.y } : t))
+          return
+        }
+        if (!onDropFiles || !fileDrag(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; const p = imageAt(e) ?? "slide"; if (p !== dropAt) setDropAt(p)
+      }}
+      onDragLeave={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) { setDropAt(null); setInsertAt(null) } }}
       onDrop={(e) => {
         setDropAt(null)
+        if (dragging && onDropElement) {
+          e.preventDefault()
+          const t = dropTarget(e)
+          setInsertAt(null)
+          if (t) onDropElement({ parent: t.parent, index: t.index, x: t.x, y: t.y })
+          return
+        }
         if (!onDropFiles || !fileDrag(e)) return
         e.preventDefault()
         const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"))
@@ -313,7 +373,14 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
       hidden={editing ? new Set([editing.path]) : undefined}
       style={{ cursor: crop.current ? "grabbing" : cropping ? "move" : gesture.current?.moved ? "grabbing" : "default", touchAction: "none" }}
     >
-      {hov && !gesture.current && <div style={{ position: "absolute", left: hov.x, top: hov.y, width: hov.w, height: hov.h, outline: `${line}px dashed rgba(242,169,34,.7)`, pointerEvents: "none", zIndex: 20 }} />}
+      {hov && !gesture.current && <div style={{ position: "absolute", left: hov.x, top: hov.y, width: hov.w, height: hov.h, outline: `${line}px dashed ${hovEl?.instance || hovEl?.component ? COMPONENT_COLOR : "rgba(242,169,34,.7)"}`, pointerEvents: "none", zIndex: 20 }} />}
+      {insertAt && dragging && (
+        <>
+          {insertAt.box && <div style={{ position: "absolute", left: insertAt.box.x, top: insertAt.box.y, width: insertAt.box.w, height: insertAt.box.h, outline: `${line}px solid #f2a922`, background: "rgba(242,169,34,.08)", pointerEvents: "none", zIndex: 25 }} />}
+          {insertAt.line && <div style={{ position: "absolute", left: insertAt.line.x - line, top: insertAt.line.y - line, width: insertAt.line.w + line * 2, height: insertAt.line.h + line * 2, background: "#f2a922", borderRadius: line, pointerEvents: "none", zIndex: 26 }} />}
+          {!insertAt.line && !insertAt.box && <div style={{ position: "absolute", left: insertAt.x - handleSize, top: insertAt.y - handleSize, width: handleSize * 2, height: handleSize * 2, borderRadius: "50%", background: "#f2a922", pointerEvents: "none", zIndex: 26 }} />}
+        </>
+      )}
       {dropAt && (() => { const r = dropAt === "slide" ? { x: 0, y: 0, w: deck.width, h: deck.height } : measure(dropAt); return r ? <div style={{ position: "absolute", left: r.x, top: r.y, width: r.w, height: r.h, outline: `${line * 2}px dashed #f2a922`, outlineOffset: -line * 2, background: "rgba(242,169,34,.12)", pointerEvents: "none", zIndex: 25 }} /> : null })()}
       {crp && (
         <div style={{ position: "absolute", left: crp.x, top: crp.y, width: crp.w, height: crp.h, outline: `${line}px dashed #f2a922`, boxShadow: "0 0 0 100000px rgba(0,0,0,.45)", pointerEvents: "none", zIndex: 24, cursor: "move" }}>
@@ -323,7 +390,7 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
         </div>
       )}
       {sel && !editing && !cropping && (
-        <div style={{ position: "absolute", left: sel.x, top: sel.y, width: sel.w, height: sel.h, outline: `${line}px solid #f2a922`, pointerEvents: "none", zIndex: 21 }}>
+        <div style={{ position: "absolute", left: sel.x, top: sel.y, width: sel.w, height: sel.h, outline: `${line}px solid ${selColor}`, pointerEvents: "none", zIndex: 21 }}>
           {canResize && (["nw", "n", "ne", "e", "se", "s", "sw", "w"] as Handle[]).map((hd) => (
             <div
               key={hd}
@@ -331,16 +398,16 @@ export function EditableSlide({ deck, slide, selected, onSelect, onChangeBox, on
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               style={{
-                position: "absolute", width: handleSize, height: handleSize, background: "#fff", border: `${line}px solid #f2a922`, borderRadius: handleSize / 4, pointerEvents: "auto",
+                position: "absolute", width: handleSize, height: handleSize, background: "#fff", border: `${line}px solid ${selColor}`, borderRadius: handleSize / 4, pointerEvents: "auto",
                 left: hd.includes("w") ? -handleSize / 2 : hd.includes("e") ? sel.w - handleSize / 2 : sel.w / 2 - handleSize / 2,
                 top: hd.includes("n") ? -handleSize / 2 : hd.includes("s") ? sel.h - handleSize / 2 : sel.h / 2 - handleSize / 2,
                 cursor: `${hd}-resize`,
               }}
             />
           ))}
-          {selEl?.props.x == null && selEl?.props.y == null && canResize && (
-            <div style={{ position: "absolute", top: -34 / scale, left: 0, fontSize: 12 / scale, color: "#18212b", background: "#f2a922", padding: `${2 / scale}px ${6 / scale}px`, borderRadius: 4 / scale, whiteSpace: "nowrap", fontFamily: "system-ui" }}>
-              {selEl.type} · in layout (drag to pin)
+          {(selEl?.instance || (selEl?.props.x == null && selEl?.props.y == null && canResize)) && (
+            <div style={{ position: "absolute", top: -34 / scale, left: 0, fontSize: 12 / scale, color: selEl!.instance ? "#fff" : "#18212b", background: selColor, padding: `${2 / scale}px ${6 / scale}px`, borderRadius: 4 / scale, whiteSpace: "nowrap", fontFamily: "system-ui" }}>
+              {selEl!.instance ? `◇ ${selEl!.instance.name}` : selEl!.type}{selEl!.props.x == null && selEl!.props.y == null && canResize ? " · in layout (drag to pin)" : ""}
             </div>
           )}
         </div>

@@ -1,6 +1,10 @@
 import type { DeckModel, Diagnostic, ElementNode } from "./types"
 
 function summarize(el: ElementNode): string {
+  if (el.instance) {
+    const n = el.instance.slot?.count ?? 0
+    return `<${el.instance.name}> component${n ? ` with ${n} child element${n > 1 ? "s" : ""}` : ""}`
+  }
   const p = el.props
   switch (el.type) {
     case "list": return `list (${(p.items as string[])?.length ?? 0} items)`
@@ -22,6 +26,7 @@ export function outline(deck: DeckModel): string {
   const t = deck.theme
   const brand = [t.logo && "logo", t.footer && "footer", t.slideNumbers && "slide numbers", t.fontFaces?.length && "font files", t.master?.length && `${t.master.length} master elements`, t.layouts && `layouts ${Object.keys(t.layouts).join(", ")}`].filter(Boolean)
   const lines = [`Deck "${deck.title}" — theme ${t.name}${brand.length ? ` (brand: ${brand.join(", ")})` : ""}, ${deck.aspect}, ${deck.slides.length} slides`]
+  if (deck.components?.length) lines.push(`Components: ${deck.components.map((c) => `${c.name} (${c.uses} use${c.uses === 1 ? "" : "s"})`).join(", ")}`)
   for (const s of deck.slides) {
     lines.push(`Slide ${s.index + 1} [${s.themeLayout ?? s.layout}]${s.props.master === false ? " master=false" : ""}${s.props.transition ? ` transition=${s.props.transition}` : ""}`)
     for (const el of s.elements) lines.push(`  - ${summarize(el)}${el.props.x != null ? " (absolute)" : ""}${el.props.step ? ` step ${el.props.step}` : ""}`)

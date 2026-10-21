@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@alexandernygard/components"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup, ResizableSidebar, ResizableSidebarProvider } from "@alexandernygard/components"
 import { AlertCircleIcon } from "lucide-react"
 import { useStore } from "./store"
 import { TopBar } from "./components/TopBar"
@@ -7,7 +7,7 @@ import { Thumbnails } from "./components/Thumbnails"
 import { Canvas } from "./components/Canvas"
 import { CodeEditor } from "./components/CodeEditor"
 import { NotesBar } from "./components/NotesBar"
-import { ChatPanel } from "./components/ChatPanel"
+import { RightSidebar } from "./components/RightSidebar"
 import { SettingsDialog } from "./components/SettingsDialog"
 import { RenderFarm } from "./components/RenderFarm"
 import { PresentOverlay } from "./components/PresentOverlay"
@@ -52,7 +52,7 @@ export function App() {
   const view = useStore((s) => s.view)
   const [settings, setSettings] = useState(false)
   return (
-    <>
+    <ResizableSidebarProvider>
       <div id="app-shell" className="flex h-full flex-col bg-background text-foreground">
         <TopBar onSettings={() => setSettings(true)} />
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
@@ -70,14 +70,14 @@ export function App() {
             ) : view === "canvas" ? <CanvasPane /> : <CodePane />}
           </ResizablePanel>
           <ResizableHandle />
-          <ResizablePanel defaultSize="25%" minSize="18%" maxSize="40%" className="border-l">
-            <ChatPanel onNeedKey={() => setSettings(true)} />
-          </ResizablePanel>
+          <ResizableSidebar id="assistant" shortcut="mod+alt+b" defaultSize="25%" minSize="18%" maxSize="40%" className="border-l">
+            <RightSidebar onNeedKey={() => setSettings(true)} />
+          </ResizableSidebar>
         </ResizablePanelGroup>
       </div>
       <RenderFarm />
       <PresentOverlay />
       <SettingsDialog open={settings} onOpenChange={setSettings} />
-    </>
+    </ResizableSidebarProvider>
   )
 }

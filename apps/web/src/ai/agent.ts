@@ -5,7 +5,8 @@ import Anthropic from "@anthropic-ai/sdk"
 import { create } from "zustand"
 import { toJpeg } from "html-to-image"
 import { applyEdits, compile, elementRange, lintDeck, outline, PatchError, type Diagnostic } from "@ppt2/sdk"
-import { findElement, inspectSlideElement } from "@ppt2/react"
+import { inspectSlideElement } from "@ppt2/react"
+import { codeOf, elementAt } from "../lib/tree"
 import { useLibrary } from "../library"
 import { useStore } from "../store"
 import { farmSlide, settled } from "../components/RenderFarm"
@@ -107,9 +108,9 @@ export const useChat = create<ChatState>()((set, get) => ({
     const { apiKey, model, effort } = useSettings.getState()
     if (!apiKey) throw new Error("NO_KEY")
     const app = useStore.getState()
-    const slide = app.deck?.slides[app.current]
-    const sel = app.selected && slide ? findElement(slide.elements, app.selected) : undefined
-    const selCode = sel?.src != null ? app.source.slice(sel.src, sourceEnd(app.source, sel.src)) : undefined
+    const sel = app.selected && app.deck ? elementAt(app.deck, app.selected) : undefined
+    const selSrc = sel && codeOf(sel)
+    const selCode = selSrc != null ? app.source.slice(selSrc, sourceEnd(app.source, selSrc)) : undefined
 
     const history = [...get().history, { role: "user" as const, content: userTurn({ text, source: app.source, slide: app.current, selection: app.selected ? { path: app.selected, code: selCode } : undefined, attachments, assets: useLibrary.getState().assets }) }]
     const assistantId = uid()

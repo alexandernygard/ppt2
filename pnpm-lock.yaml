@@ -15,8 +15,8 @@ importers:
   apps/web:
     dependencies:
       '@alexandernygard/components':
-        specifier: ^0.1.4
-        version: 0.1.4(@date-fns/tz@1.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@19.3.1)(react@19.3.1)(redux@5.0.1)
+        specifier: ^0.2.0
+        version: 0.2.0(@date-fns/tz@1.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(recharts@3.8.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@19.3.1)(react@19.3.1)(redux@5.0.1))
       '@anthropic-ai/sdk':
         specifier: ^0.135.0
         version: 0.135.0
@@ -85,8 +85,8 @@ importers:
   packages/react:
     dependencies:
       '@alexandernygard/components':
-        specifier: ^0.1.4
-        version: 0.1.4(@date-fns/tz@1.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@19.3.1)(react@19.3.1)(redux@5.0.1)
+        specifier: ^0.2.0
+        version: 0.2.0(@date-fns/tz@1.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(recharts@3.8.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@19.3.1)(react@19.3.1)(redux@5.0.1))
       '@dagrejs/dagre':
         specifier: 3.1.1
         version: 3.1.1
@@ -146,11 +146,12 @@ importers:
 
 packages:
 
-  '@alexandernygard/components@0.1.4':
-    resolution: {integrity: sha512-Vim54UhvV4168A7VBuvdQePEyyEl0Y1JqOyHpn2nhyPLCXZn2AdepJQO39VENEXqbzWaP38L4PswoehrR9zXCQ==}
+  '@alexandernygard/components@0.2.0':
+    resolution: {integrity: sha512-/i7a17uOxjfnvt/5PfqSj50f81ogCx/0IjGvhEQtgPSo14vyVZxV/IPXk8YF3MvMsC8Z+YxNsOQBm9N53ptaFw==}
     peerDependencies:
       react: ^18.3.0 || ^19.0.0
       react-dom: ^18.3.0 || ^19.0.0
+      recharts: ^3.8.0
 
   '@alexandernygard/libron@0.31.0':
     resolution: {integrity: sha512-6SjSvRhCe8jCb/rCAnS4dF1k84jL5hFC17EQ/WtBLHrX7M1zmRmCdrg3Al3wPLKps0ORoK327uSVBCan9FxIVQ==}
@@ -2297,6 +2298,11 @@ packages:
   magic-string@1.4.3:
     resolution: {integrity: sha512-z12OxmaPGE0F4xlpGdjuAUckipLpQlTAuAmyGhNoD7ODpYUzvDfvtxUbjM/jwznyP178oju/KDdyi220wNJ0RQ==}
 
+  marked@18.1.1:
+    resolution: {integrity: sha512-zEGgrtUG8crk+TrMacJSVABU4DYDDkS8uqgU3ohrn/2fW9C2AEfUrO3m6IhpIpQpl7YcVpiXXC9cSMWDANT3dg==}
+    engines: {node: '>= 20'}
+    hasBin: true
+
   mdast-util-to-hast@13.2.1:
     resolution: {integrity: sha512-cctsq2wp5vTsLIcaymblUriiTcZd0CwWtCbLvrOzYCDZoWyMNV8sZ7krj09FSnsiJi3WVsHLM4k6Dq/yaPyCXA==}
 
@@ -2835,7 +2841,7 @@ packages:
 
 snapshots:
 
-  '@alexandernygard/components@0.1.4(@date-fns/tz@1.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@19.3.1)(react@19.3.1)(redux@5.0.1)':
+  '@alexandernygard/components@0.2.0(@date-fns/tz@1.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(recharts@3.8.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@19.3.1)(react@19.3.1)(redux@5.0.1))':
     dependencies:
       '@alexandernygard/tokens': 0.1.2
       '@base-ui/react': 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -2847,6 +2853,7 @@ snapshots:
       embla-carousel-react: 8.6.0(react@19.3.1)
       input-otp: 1.5.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       lucide-react: 1.59.0(@types/react@19.3.0)(react@19.3.1)
+      marked: 18.1.1
       radix-ui: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react: 19.3.1
       react-day-picker: 10.0.2(@types/react@19.3.0)(react@19.3.1)
@@ -2862,8 +2869,6 @@ snapshots:
       - '@date-fns/tz'
       - '@types/react'
       - '@types/react-dom'
-      - react-is
-      - redux
 
   '@alexandernygard/libron@0.31.0': {}
 
@@ -4741,6 +4746,8 @@ snapshots:
   magic-string@1.4.3:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  marked@18.1.1: {}
 
   mdast-util-to-hast@13.2.1:
     dependencies:

@@ -4,8 +4,8 @@ import { EditorView, Decoration, type DecorationSet, keymap } from "@codemirror/
 import { EditorState, StateEffect, StateField, Annotation, Compartment } from "@codemirror/state"
 import { javascript } from "@codemirror/lang-javascript"
 import { indentWithTab } from "@codemirror/commands"
-import { elementAtOffset, elementRange } from "@ppt2/sdk"
-import { findElement } from "@ppt2/react"
+import { elementAtOffset, elementRange, type ElementNode } from "@ppt2/sdk"
+import { codeOf, elementAt } from "../lib/tree"
 import { useStore } from "../store"
 
 const External = Annotation.define<boolean>()
@@ -63,6 +63,7 @@ export function CodeEditor() {
   const source = useStore((s) => s.source)
   const revision = useStore((s) => s.revision)
   const selected = useStore((s) => s.selected)
+  const editingComponent = useStore((s) => s.editingComponent)
   const current = useStore((s) => s.current)
   const deck = useStore((s) => s.deck)
 
@@ -118,11 +119,11 @@ export function CodeEditor() {
   useEffect(() => {
     const v = view.current
     if (!v || !deck || v.hasFocus || useStore.getState().errors.length) return
-    const slide = deck.slides[current]
-    const target = selected ? (slide && findElement(slide.elements, selected))?.src : slide?.src
+    const el = selected ? elementAt(deck, selected) : undefined
+    const target = el ? codeOf(el) : editingComponent ? deck.components.find((c) => c.name === editingComponent)?.template?.src : deck.slides[current]?.src
     const range = target != null ? elementRange(source, target) : undefined
     v.dispatch({ effects: [setSelectedRange.of(range ? { from: range.start, to: range.end } : null), ...(range ? [EditorView.scrollIntoView(range.start, { y: "start", yMargin: 40 })] : [])] })
-  }, [selected, current, deck])
+  }, [selected, current, deck, editingComponent])
 
   return <div ref={host} className="h-full min-h-0 overflow-hidden" />
 }
@@ -131,16 +132,26 @@ let syncTimer: ReturnType<typeof setTimeout> | undefined
 function syncCanvasToCursor(source: string, pos: number) {
   clearTimeout(syncTimer)
   syncTimer = setTimeout(() => {
-    const { deck, current, selected } = useStore.getState()
+    const { deck, current, selected, editingComponent } = useStore.getState()
     if (!deck) return
     const chain = elementAtOffset(source, pos)
+    const deepest = (els: ElementNode[]) => {
+      let found: string | null = null
+      const visit = (list: ElementNode[]) => { for (const el of list) { const src = codeOf(el); if (src != null && chain.includes(src)) found = el.path; if (el.children) visit(el.children) } }
+      visit(els)
+      return found
+    }
     for (const s of deck.slides) {
       if (s.src == null || !chain.includes(s.src)) continue
-      let found: string | null = null
-      const visit = (els: typeof s.elements) => { for (const el of els) { if (el.src != null && chain.includes(el.src)) found = el.path; if (el.children) visit(el.children) } }
-      visit(s.elements)
-      if (s.index !== current || found !== selected) useStore.setState({ current: s.index, selected: found })
+      const found = deepest(s.elements)
+      if (s.index !== current || found !== selected || editingComponent) useStore.setState({ current: s.index, selected: found, editingComponent: null })
       return
+    }
+    // In a component's definition: open it in the component editor.
+    const def = deck.components.find((c) => c.template?.src != null && chain.includes(c.template.src))
+    if (def?.template) {
+      const found = deepest([def.template])
+      if (def.name !== editingComponent || found !== selected) useStore.setState({ editingComponent: def.name, selected: found })
     }
   }, 120)
 }

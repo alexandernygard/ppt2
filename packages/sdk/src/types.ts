@@ -26,6 +26,8 @@ export type ElementType =
   | "cycle"
   | "step"
   | "node"
+  /** Where a component's children go. Only inside a component definition. */
+  | "slot"
 
 export type LayoutName =
   | "title"
@@ -77,6 +79,31 @@ export interface ElementNode {
   /** Text content for text-bearing elements. */
   text?: string
   children?: ElementNode[]
+  /** Set on the root of a component instance. Geometry and other instance props are written to `src` (the <Callout> tag). */
+  instance?: InstanceInfo
+  /** Set on elements that come from a component's definition: editing them edits every use of the component. */
+  component?: string
+}
+
+export interface InstanceInfo {
+  /** The component's name. */
+  name: string
+  /** Offset of the instance's tag (<Callout>) in the source. */
+  src?: number
+  /** Where the instance's children ended up: the container at `path`, starting at child `index`. undefined when the component has no <Slot />. */
+  slot?: { path: string; index: number; count: number }
+}
+
+/** A reusable component: `const Callout = component(<Card>…<Slot /></Card>)`. */
+export interface ComponentDef {
+  name: string
+  /** Offset of the component(…) call. */
+  src?: number
+  description?: string
+  /** The definition on its own, with its <Slot /> as an element of type "slot". Its path is "c/<index>". */
+  template?: ElementNode
+  /** How many times the slides use it. */
+  uses: number
 }
 
 export interface SlideNode {
@@ -206,6 +233,8 @@ export interface DeckModel {
   theme: Theme
   themeInput: ThemeInput
   slides: SlideNode[]
+  /** Components the deck defines with component(…), in source order. */
+  components: ComponentDef[]
   src?: number
   props: Record<string, unknown>
 }

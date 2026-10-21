@@ -146,6 +146,13 @@ function ElementBody({ el, layout, slot }: { el: ElementNode; layout: LayoutName
     case "timeline":
     case "cycle":
       return <DiagramEl el={el} />
+    case "slot":
+      // Only drawn while editing a component's definition.
+      return (
+        <div style={{ minHeight: 120, height: "100%", display: "grid", placeItems: "center", border: "3px dashed #8b5cf6", borderRadius: "var(--p-radius)", background: "rgba(139,92,246,.08)", color: "#7c3aed", fontSize: 26, fontFamily: "system-ui" }}>
+          Children go here
+        </div>
+      )
     default:
       return null
   }

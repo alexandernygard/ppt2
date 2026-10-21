@@ -19,7 +19,7 @@
     "vite": "^8.3.4"
   },
   "dependencies": {
-    "@alexandernygard/components": "^0.1.4",
+    "@alexandernygard/components": "^0.2.0",
     "@anthropic-ai/sdk": "^0.135.0",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-javascript": "^6.2.5",
