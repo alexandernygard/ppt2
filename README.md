@@ -20,6 +20,10 @@ pnpm dev:worker   # Worker + Durable Object on :8788 (vite proxies /collab to it
 pnpm dev          # the app
 ```
 
+### Drive
+
+Decks in [Drive](../drive) (drive.nyggis.com) open here as `/?file=<id>` and sync through the drive's rooms instead of this app's Worker, so sharing follows Drive: people you add by email, as viewers or editors, with Nyggis accounts. The header shows who else is in the file and Drive's share dialog. *Save to Drive* (in Share) moves a local deck there. Locally, run the drive (`pnpm dev:worker` in `../drive`) and the auth Worker (:8787).
+
 ## Packages
 
 | Package | What it is |

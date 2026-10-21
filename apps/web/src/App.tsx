@@ -13,6 +13,7 @@ import { RenderFarm } from "./components/RenderFarm"
 import { PresentOverlay } from "./components/PresentOverlay"
 import { useLibrary } from "./library"
 import { closeRoom, openRoom } from "./collab"
+import { DriveNotice } from "./components/ShareDialog"
 
 function Diagnostics() {
   const errors = useStore((s) => s.errors)
@@ -56,6 +57,16 @@ export function App() {
   const deckId = useLibrary((s) => s.currentId)
   const roomId = useLibrary((s) => s.decks.find((d) => d.id === s.currentId)?.roomId)
 
+  // A Drive deck keeps ?file=<id> in the address while it's open, so a reload or a copied link opens it again.
+  const driveFile = useLibrary((s) => { const d = s.decks.find((d) => d.id === s.currentId); return d?.drive ? d.roomId : undefined })
+  useEffect(() => {
+    if (location.hash === "#audience") return
+    const url = new URL(location.href)
+    if (driveFile) url.searchParams.set("file", driveFile)
+    else url.searchParams.delete("file")
+    if (url.href !== location.href) history.replaceState(null, "", url)
+  }, [driveFile])
+
   // A shared deck keeps a live room open while it is the open one.
   useEffect(() => {
     if (!roomId) return
@@ -66,6 +77,7 @@ export function App() {
     <ResizableSidebarProvider>
       <div id="app-shell" className="flex h-full flex-col bg-background text-foreground">
         <TopBar onSettings={() => setSettings(true)} />
+        <DriveNotice />
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel defaultSize="13%" minSize="8%" maxSize="22%" className="border-r">
             <Thumbnails />

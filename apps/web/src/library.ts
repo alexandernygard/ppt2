@@ -177,7 +177,7 @@ async function save() {
   if (source === lastSaved) { set({ status: "saved" }); return }
   const prev = decks.find((d) => d.id === currentId)
   if (!prev) return
-  const rec: DeckRecord = { ...prev, source, title: deck?.title ?? prev.title, slides: deck?.slides.length ?? prev.slides, updatedAt: Date.now() }
+  const rec: DeckRecord = { ...prev, source, title: prev.drive ? prev.title : deck?.title ?? prev.title, slides: deck?.slides.length ?? prev.slides, updatedAt: Date.now() }
   try {
     await db.put("decks", rec)
     lastSaved = source
@@ -310,21 +310,21 @@ export async function deleteDeck(id: string) {
 // --- sharing ----------------------------------------------------------------
 
 /** Share the open deck in a live room (or stop sharing it, with undefined). */
-export async function shareDeck(roomId: string | undefined) {
+export async function shareDeck(roomId: string | undefined, drive?: boolean) {
   await flush()
   const prev = await db.get("decks", get().currentId)
   if (!prev) return
-  const rec = { ...prev, roomId }
+  const rec = { ...prev, roomId, drive: roomId ? drive : undefined }
   await db.put("decks", rec)
   set({ decks: get().decks.map((d) => (d.id === rec.id ? rec : d)) })
 }
 
 /** Open someone's shared deck from a link: the copy you already have, or a new one that fills in from the room. */
-export async function joinRoom(roomId: string) {
-  const existing = get().decks.find((d) => d.roomId === roomId)
+export async function joinRoom(roomId: string, drive?: boolean) {
+  const existing = get().decks.find((d) => d.roomId === roomId && !!d.drive === !!drive)
   if (existing) return openDeck(existing.id)
   await flush()
-  const rec: DeckRecord = { ...record(""), title: "Shared deck", roomId }
+  const rec: DeckRecord = { ...record(""), title: drive ? "Opening…" : "Shared deck", roomId, drive }
   await db.put("decks", rec)
   upsertList(rec)
   await activate(rec)
@@ -537,3 +537,12 @@ export async function loadCurrentAssets() {
 }
 
 if (import.meta.env.DEV) (window as unknown as { __ppt2lib: unknown }).__ppt2lib = { useLibrary, saveToFolder, saveToFile, openFolder, openFile, unlink, listVersions }
+
+/** Drive renamed the open deck: keep the library's copy in step. */
+export async function setDriveTitle(deckId: string, title: string) {
+  const prev = await db.get("decks", deckId)
+  if (!prev || prev.title === title) return
+  const rec = { ...prev, title }
+  await db.put("decks", rec)
+  set({ decks: get().decks.map((d) => (d.id === rec.id ? rec : d)) })
+}

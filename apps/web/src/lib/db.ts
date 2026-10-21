@@ -10,6 +10,8 @@ export interface DeckRecord {
   updatedAt: number
   /** Set while the deck is shared: the id of its live-collaboration room. */
   roomId?: string
+  /** The room is a file in Drive (drive.nyggis.com): roomId is its id, access follows its sharing, and Drive owns its title. */
+  drive?: boolean
 }
 
 export interface VersionRecord {

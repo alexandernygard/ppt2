@@ -14,10 +14,17 @@ import {
   throttle,
   type Peer,
 } from "@alexandernygard/collab"
+import { toJpeg } from "html-to-image"
+import { DriveError, deniedMessage, getDrive, type Item, type Me } from "@alexandernygard/drive"
 import { collabHooks, useStore } from "./store"
-import { deckAssets, putAsset, useLibrary } from "./library"
+import { deckAssets, putAsset, setDriveTitle, shareDeck, useLibrary } from "./library"
+import { farmSlide, settled } from "./components/RenderFarm"
 
-// Live collaboration for the open deck. The Y.Doc holds the deck source as one text ("source") and the
+export const drive = getDrive()
+
+// Live collaboration for the open deck. A deck in Drive (drive.nyggis.com) connects to the drive's room
+// with a ticket that carries the person's access; a deck shared by link uses this app's own Worker.
+// The Y.Doc holds the deck source as one text ("source") and the
 // deck's images and fonts as bytes ("assets", keyed by the name the source refers to). The store stays
 // the source the rest of the app reads; bindText keeps the two equal, and edits from others arrive
 // through setSource(…, "remote").
@@ -39,6 +46,12 @@ interface CollabState {
   canRedo: boolean
   name: string
   setName(name: string): void
+  /** The Drive file, as of the last ticket (name, sharing, your role). */
+  driveItem: Item | null
+  /** View-only access to a Drive deck. */
+  readOnly: boolean
+  /** The ticket was refused because nobody is signed in. */
+  needsSignIn: boolean
 }
 
 const NAME_KEY = "ppt2.name"
@@ -58,6 +71,9 @@ export const useCollab = create<CollabState>()((set) => ({
   canUndo: false,
   canRedo: false,
   name: loadName(),
+  driveItem: null,
+  readOnly: false,
+  needsSignIn: false,
   setName(name) {
     set({ name })
     try {
@@ -69,7 +85,11 @@ export const useCollab = create<CollabState>()((set) => ({
 
 // One id per browser tab, so your own other tabs show up as separate people.
 const tabId = Math.random().toString(36).slice(2, 8)
-const me = () => ({ name: useCollab.getState().name, color: colorFor(tabId), id: tabId })
+let account: Me | null = null
+const me = () =>
+  account
+    ? { name: account.name || account.email, color: colorFor(account.id), id: account.id, picture: account.picture, email: account.email }
+    : { name: useCollab.getState().name, color: colorFor(tabId), id: tabId }
 
 /** 22 random base64url characters (128 bits). Knowing the id is the permission to edit. */
 export function newRoomId(): string {
@@ -96,7 +116,30 @@ interface Session {
 let session: Session | null = null
 
 function start(deckId: string, roomId: string): Session {
-  const provider = new CollabProvider({ url: collabUrl(roomId) })
+  const onDrive = !!useLibrary.getState().decks.find((d) => d.id === deckId)?.drive
+  let provider!: CollabProvider
+  const options = onDrive
+    ? drive.roomOptions(
+        roomId,
+        (t) => {
+          useCollab.setState({ driveItem: t.item, readOnly: t.readOnly, needsSignIn: false, failure: null })
+          void setDriveTitle(deckId, t.item.name)
+        },
+        (e: DriveError) => {
+          useCollab.setState({ failure: deniedMessage(e), needsSignIn: e.status === 401 })
+          setTimeout(() => provider.disconnect())
+        },
+      )
+    : { url: collabUrl(roomId) }
+  provider = new CollabProvider(options)
+  if (onDrive)
+    void drive.me().then(
+      (m) => {
+        account = m
+        setPresence(provider.awareness, { user: me() })
+      },
+      () => {},
+    )
   const ydoc = provider.doc
   const text = ydoc.getText("source")
   const assetData = ydoc.getMap<Uint8Array>("assets")
@@ -191,6 +234,31 @@ function start(deckId: string, roomId: string): Session {
   publish()
   cleanups.push(useStore.subscribe((s, prev) => (s.current !== prev.current || s.selected !== prev.selected || s.editingComponent !== prev.editingComponent) && publish()))
 
+  // Drive shows the first slide on the deck's card: send a small picture of it after your own edits.
+  if (onDrive) {
+    let thumbTimer: ReturnType<typeof setTimeout> | undefined
+    const sendThumb = async () => {
+      if (!here() || useCollab.getState().readOnly) return
+      await settled(300)
+      const root = farmSlide(0)
+      if (!root) return
+      try {
+        const url = await toJpeg(root, { pixelRatio: 0.25, quality: 0.78, skipFonts: true, cacheBust: false })
+        await drive.setThumbnail(roomId, await (await fetch(url)).blob())
+      } catch {
+        // A missing thumbnail only means Drive draws the deck itself.
+      }
+    }
+    cleanups.push(
+      useStore.subscribe((s, prev) => {
+        if (s.source === prev.source || s.lastOrigin === "remote") return
+        clearTimeout(thumbTimer)
+        thumbTimer = setTimeout(() => void sendThumb(), 8000)
+      }),
+      () => clearTimeout(thumbTimer),
+    )
+  }
+
   collabHooks.undo = () => undoManager.undo()
   collabHooks.redo = () => undoManager.redo()
   useCollab.setState({ roomId, status: "connecting", failure: null, peers: [], canUndo: false, canRedo: false })
@@ -205,7 +273,7 @@ function start(deckId: string, roomId: string): Session {
       collabHooks.undo = collabHooks.redo = undefined
       undoManager.destroy()
       provider.destroy()
-      useCollab.setState({ roomId: null, status: "off", peers: [], failure: null, canUndo: false, canRedo: false })
+      useCollab.setState({ roomId: null, status: "off", peers: [], failure: null, canUndo: false, canRedo: false, driveItem: null, readOnly: false, needsSignIn: false })
     },
   }
 }
@@ -224,4 +292,14 @@ export function closeRoom() {
 /** Others on this slide (or in this component's editor), for outlines on the canvas and dots on thumbnails. */
 export function peersOn(peers: Peer<PptPresence>[], slide: number, component: string | null) {
   return peers.filter((p) => (component ? p.state.component === component : !p.state.component && p.state.slide === slide))
+}
+
+/** Put the open deck in Drive: it becomes a Drive file you can share with people, and this copy follows it. */
+export async function saveToDrive(): Promise<Item> {
+  const { decks, currentId } = useLibrary.getState()
+  const deck = decks.find((d) => d.id === currentId)
+  const item = await drive.create({ kind: "deck", name: useStore.getState().deck?.title ?? deck?.title ?? "Untitled deck", content: { text: useStore.getState().source } })
+  await shareDeck(item.id, true)
+  await setDriveTitle(currentId, item.name)
+  return item
 }

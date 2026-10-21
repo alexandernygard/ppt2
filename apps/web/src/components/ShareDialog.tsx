@@ -15,12 +15,53 @@ import {
   TooltipTrigger,
   cn,
 } from "@alexandernygard/components"
-import { CheckIcon, CopyIcon } from "lucide-react"
-import { newRoomId, shareLink, useCollab } from "../collab"
+import { CheckIcon, CopyIcon, UsersIcon } from "lucide-react"
+import { toast } from "@alexandernygard/components"
+import { DriveFileButton, DriveLogo } from "@alexandernygard/drive/react"
+import { drive, newRoomId, saveToDrive, shareLink, useCollab } from "../collab"
 import { shareDeck, useLibrary } from "../library"
 
-/** Who else is in this deck, and whether we are connected. */
-export function Peers() {
+/** Share, for the deck that's open: Drive's sharing for a Drive deck, else live link sharing. */
+export function ShareControls() {
+  const deck = useLibrary((s) => s.decks.find((d) => d.id === s.currentId))
+  const driveItem = useCollab((s) => s.driveItem)
+  const peers = useCollab((s) => s.peers)
+  const [sharing, setSharing] = useState(false)
+  if (deck?.drive && deck.roomId) {
+    return (
+      <>
+        <Peers status />
+        <DriveFileButton fileId={deck.roomId} item={driveItem} peers={peers.map((p) => p.state.user)} onItemChange={(item) => useCollab.setState({ driveItem: item })} />
+      </>
+    )
+  }
+  return (
+    <>
+      <Peers />
+      <Button size="sm" variant={deck?.roomId ? "secondary" : "ghost"} onClick={() => setSharing(true)}><UsersIcon /> Share</Button>
+      <ShareDialog open={sharing} onOpenChange={setSharing} />
+    </>
+  )
+}
+
+/** Why a Drive deck isn't open (signed out, no access), or that you can only view it. */
+export function DriveNotice() {
+  const failure = useCollab((s) => s.failure)
+  const needsSignIn = useCollab((s) => s.needsSignIn)
+  const readOnly = useCollab((s) => s.readOnly)
+  const onDrive = useLibrary((s) => !!s.decks.find((d) => d.id === s.currentId)?.drive)
+  if (!onDrive || (!failure && !readOnly)) return null
+  return (
+    <div className={cn("flex items-center gap-3 border-b px-4 py-2 text-sm", failure ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}>
+      <DriveLogo size={18} />
+      <span className="flex-1">{failure ?? "You can view this deck. Ask the owner for edit access to make changes."}</span>
+      {needsSignIn && <Button size="sm" asChild><a href={drive.loginUrl()}>Sign in</a></Button>}
+    </div>
+  )
+}
+
+/** Who else is in this deck, and whether we are connected. `status` shows only the connection. */
+export function Peers({ status: statusOnly = false }: { status?: boolean }) {
   const roomId = useCollab((s) => s.roomId)
   const status = useCollab((s) => s.status)
   const peers = useCollab((s) => s.peers)
@@ -29,7 +70,7 @@ export function Peers() {
   const label = status === "live" ? "Live" : status === "connecting" ? "Connecting…" : status === "failed" ? "Can't connect" : "Offline, changes will sync when you reconnect"
   return (
     <div className="flex items-center gap-2">
-      <div className="flex -space-x-1.5">
+      <div className={cn("flex -space-x-1.5", statusOnly && "hidden")}>
         {peers.slice(0, 5).map((p) => (
           <Tooltip key={p.clientId}>
             <TooltipTrigger asChild>
@@ -45,7 +86,7 @@ export function Peers() {
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
-            <span className={cn("size-2 rounded-full", dot)} /> {status === "live" ? (peers.length ? `${peers.length + 1} here` : "Live") : label.split(",")[0]}
+            <span className={cn("size-2 rounded-full", dot)} /> {statusOnly && status === "live" ? "" : status === "live" ? (peers.length ? `${peers.length + 1} here` : "Live") : label.split(",")[0]}
           </span>
         </TooltipTrigger>
         <TooltipContent>{label}</TooltipContent>
@@ -77,6 +118,24 @@ export function ShareDialog({ open, onOpenChange }: { open: boolean; onOpenChang
           </DialogDescription>
         </DialogHeader>
         {failure && <p className="text-sm text-destructive">{failure}</p>}
+        <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3">
+          <DriveLogo size={28} className="mt-0.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Save to Drive</p>
+            <p className="text-xs text-muted-foreground">Share with people by email, choose who can edit, and find it with all your files at drive.nyggis.com.</p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() =>
+              saveToDrive().then(
+                () => { onOpenChange(false); toast.success("Saved to Drive", { description: "Use Share to add people." }) },
+                (e) => (e?.signedOut ? (location.href = drive.loginUrl()) : toast.error(e?.message ?? "Couldn't save to Drive")),
+              )
+            }
+          >
+            Save
+          </Button>
+        </div>
         {roomId && (
           <div className="flex gap-2">
             <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} aria-label="Share link" />
