@@ -135,7 +135,8 @@ export const useStore = create<State>()((set, get) => ({
   ...compiled(initial),
   current: 0,
   selected: null,
-  view: "split",
+  // Canvas, code and sidebar side by side need a laptop-wide window; narrower ones start on the canvas.
+  view: typeof window !== "undefined" && window.innerWidth < 1024 ? "canvas" : "split",
   past: [],
   future: [],
   lastOrigin: "load",

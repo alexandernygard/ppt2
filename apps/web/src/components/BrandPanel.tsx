@@ -96,7 +96,7 @@ export function BrandPanel({ open, onOpenChange }: { open: boolean; onOpenChange
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
-      <SheetContent side="right" className="w-96 overflow-y-auto sm:max-w-96" onInteractOutside={(e) => e.preventDefault()}>
+      <SheetContent side="right" className="w-[min(24rem,100vw)] overflow-y-auto sm:max-w-96" onInteractOutside={(e) => e.preventDefault()}>
         <SheetHeader>
           <SheetTitle>Brand</SheetTitle>
           <SheetDescription>Logo, footer, numbers and fonts on every slide. Stored in the deck's theme, so they travel with the code.</SheetDescription>

@@ -49,7 +49,7 @@ export function ShareControls() {
   return (
     <>
       <Peers />
-      <Button size="sm" variant={deck?.roomId ? "secondary" : "ghost"} onClick={() => setSharing(true)}><UsersIcon /> Share</Button>
+      <Button size="sm" variant={deck?.roomId ? "secondary" : "ghost"} aria-label="Share" onClick={() => setSharing(true)}><UsersIcon /> <span className="hidden sm:inline">Share</span></Button>
       <ShareDialog open={sharing} onOpenChange={setSharing} onSaved={setSaved} />
     </>
   )

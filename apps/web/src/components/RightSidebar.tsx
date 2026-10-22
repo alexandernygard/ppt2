@@ -12,7 +12,7 @@ export function RightSidebar({ onNeedKey }: { onNeedKey: () => void }) {
   const editing = useStore((s) => s.editingComponent)
   return (
     <Tabs value={tab} onValueChange={(t) => useStore.getState().setSidebarTab(t as SidebarTab)} className="@container flex h-full min-h-0 flex-col gap-0">
-      <div className="flex h-11 shrink-0 items-center border-b px-2">
+      <div className="flex h-11 shrink-0 items-center border-b px-2 in-data-[mobile=true]:pr-12">
         <TabsList className="w-full">
           <TabsTrigger value="assistant" title="Assistant"><SparklesIcon /><span className="hidden @[22rem]:inline">Assistant</span></TabsTrigger>
           <TabsTrigger value="layers" title="Layers and elements"><LayersIcon /><span className="hidden @[22rem]:inline">Layers</span></TabsTrigger>

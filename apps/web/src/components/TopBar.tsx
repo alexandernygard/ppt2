@@ -5,7 +5,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuGroup,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -23,7 +26,7 @@ import {
   TooltipTrigger,
   toast,
 } from "@alexandernygard/components"
-import { CheckIcon, ChevronDownIcon, CloudAlertIcon, CodeIcon, Columns2Icon, FileIcon, FolderIcon, HardDriveIcon, HistoryIcon, LibraryIcon, LinkIcon, LoaderIcon, UsersIcon, PlayIcon, PresentationIcon, Redo2Icon, SettingsIcon, StampIcon, Undo2Icon, ImageIcon, FileUpIcon, FilePlusIcon, FolderOpenIcon, SaveIcon, Unlink2Icon } from "lucide-react"
+import { CheckIcon, ChevronDownIcon, EllipsisIcon, PaletteIcon, CloudAlertIcon, CodeIcon, Columns2Icon, FileIcon, FolderIcon, HardDriveIcon, HistoryIcon, LibraryIcon, LinkIcon, LoaderIcon, UsersIcon, PlayIcon, PresentationIcon, Redo2Icon, SettingsIcon, StampIcon, Undo2Icon, ImageIcon, FileUpIcon, FilePlusIcon, FolderOpenIcon, SaveIcon, Unlink2Icon } from "lucide-react"
 import { STARTER_DECK, themes } from "@ppt2/sdk"
 import { exportPptx } from "@ppt2/react"
 import { useStore, type View } from "../store"
@@ -91,38 +94,40 @@ export function TopBar({ onSettings }: { onSettings: () => void }) {
   const slug = (deck?.title ?? "deck").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "deck"
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b bg-background px-3">
+    // Narrower than lg the secondary controls move into the File menu, which turns into "⋯" on a phone, so the bar never outgrows the screen.
+    <header className="flex h-12 min-w-0 shrink-0 items-center gap-1 border-b bg-background px-2 sm:gap-2 sm:px-3">
       <div className="flex min-w-0 items-center gap-2 pr-1">
-        <div className="grid size-7 shrink-0 place-items-center rounded-md bg-primary font-heading text-sm font-bold text-primary-foreground">p2</div>
+        <div className="hidden size-7 shrink-0 place-items-center rounded-md bg-primary sm:grid font-heading text-sm font-bold text-primary-foreground">p2</div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button size="sm" variant="ghost" className="max-w-56 min-w-0 px-2" onClick={() => setLibrary(true)}>
+            <Button size="sm" variant="ghost" className="max-w-32 min-w-0 shrink px-2 sm:max-w-56" onClick={() => setLibrary(true)}>
               <span className="truncate font-medium">{(record?.drive ? record.title : deck?.title) ?? "Untitled"}</span><ChevronDownIcon className="opacity-60" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>All decks</TooltipContent>
         </Tooltip>
-        <SaveStatus />
+        <div className="hidden lg:block"><SaveStatus /></div>
       </div>
       <Tooltip>
         <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" disabled={!canUndo} onClick={() => st().undo()}><Undo2Icon /></Button></TooltipTrigger>
         <TooltipContent>Undo (⌘Z)</TooltipContent>
       </Tooltip>
       <Tooltip>
-        <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" disabled={!canRedo} onClick={() => st().redo()}><Redo2Icon /></Button></TooltipTrigger>
+        <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" className="hidden sm:inline-flex" disabled={!canRedo} onClick={() => st().redo()}><Redo2Icon /></Button></TooltipTrigger>
         <TooltipContent>Redo (⇧⌘Z)</TooltipContent>
       </Tooltip>
 
-      <div className="mx-auto">
+      <div className="flex-1 md:hidden" />
+      <div className="mx-auto hidden md:block">
         <ToggleGroup type="single" variant="outline" size="sm" value={view} onValueChange={(v) => v && st().setView(v as View)}>
-          <ToggleGroupItem value="canvas" aria-label="Canvas only"><ImageIcon /> Canvas</ToggleGroupItem>
-          <ToggleGroupItem value="split" aria-label="Side by side"><Columns2Icon /> Split</ToggleGroupItem>
-          <ToggleGroupItem value="code" aria-label="Code only"><CodeIcon /> Code</ToggleGroupItem>
+          <ToggleGroupItem value="canvas" aria-label="Canvas only"><ImageIcon /> <span className="hidden xl:inline">Canvas</span></ToggleGroupItem>
+          <ToggleGroupItem value="split" aria-label="Side by side" className="hidden md:inline-flex"><Columns2Icon /> <span className="hidden xl:inline">Split</span></ToggleGroupItem>
+          <ToggleGroupItem value="code" aria-label="Code only"><CodeIcon /> <span className="hidden xl:inline">Code</span></ToggleGroupItem>
         </ToggleGroup>
       </div>
 
       <Select value={themeName} onValueChange={(t) => st().setTheme(t)} disabled={!deck}>
-        <SelectTrigger size="sm" className="w-36">
+        <SelectTrigger size="sm" className="hidden w-36 lg:flex">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -140,14 +145,38 @@ export function TopBar({ onSettings }: { onSettings: () => void }) {
       </Select>
 
       <Tooltip>
-        <TooltipTrigger asChild><Button size="sm" variant={brand ? "secondary" : "ghost"} disabled={!deck} onClick={() => setBrand((b) => !b)}><StampIcon /> Brand</Button></TooltipTrigger>
+        <TooltipTrigger asChild><Button size="sm" variant={brand ? "secondary" : "ghost"} className="hidden lg:inline-flex" disabled={!deck} onClick={() => setBrand((b) => !b)}><StampIcon /> <span className="hidden xl:inline">Brand</span></Button></TooltipTrigger>
         <TooltipContent>Logo, footer, slide numbers and fonts</TooltipContent>
       </Tooltip>
       <BrandPanel open={brand} onOpenChange={setBrand} />
 
       <DropdownMenu>
-        <DropdownMenuTrigger asChild><Button size="sm" variant="ghost"><FileIcon /> File</Button></DropdownMenuTrigger>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="ghost" aria-label="File and more">
+            <FileIcon className="hidden md:block" /><EllipsisIcon className="md:hidden" /><span className="hidden md:inline">File</span>
+          </Button>
+        </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-60">
+          <DropdownMenuGroup className="md:hidden">
+            <DropdownMenuRadioGroup value={view === "code" ? "code" : "canvas"} onValueChange={(v) => st().setView(v as View)}>
+              <DropdownMenuRadioItem value="canvas"><ImageIcon /> Slides</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="code"><CodeIcon /> Code</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+          </DropdownMenuGroup>
+          <DropdownMenuGroup className="lg:hidden">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger disabled={!deck}><PaletteIcon /> Theme</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup value={themeName} onValueChange={(t) => st().setTheme(t)}>
+                  {Object.values(themes).map((t) => <DropdownMenuRadioItem key={t.name} value={t.name}>{t.label}</DropdownMenuRadioItem>)}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem disabled={!deck} onSelect={() => setBrand(true)}><StampIcon /> Brand…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={onSettings}><SettingsIcon /> AI settings…</DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </DropdownMenuGroup>
           <DropdownMenuItem onSelect={() => void createDeck()}><FilePlusIcon /> New deck</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void createDeck(STARTER_DECK)}><FilePlusIcon /> New from example</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setLibrary(true)}><LibraryIcon /> All decks…</DropdownMenuItem>
@@ -187,11 +216,11 @@ export function TopBar({ onSettings }: { onSettings: () => void }) {
       <ShareControls />
 
       <Tooltip>
-        <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" onClick={onSettings} aria-label="AI settings"><SettingsIcon /></Button></TooltipTrigger>
+        <TooltipTrigger asChild><Button size="icon-sm" variant="ghost" className="hidden lg:inline-flex" onClick={onSettings} aria-label="AI settings"><SettingsIcon /></Button></TooltipTrigger>
         <TooltipContent>AI settings</TooltipContent>
       </Tooltip>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild><Button size="sm" disabled={!deck?.slides.length}><PlayIcon /> Present</Button></DropdownMenuTrigger>
+        <DropdownMenuTrigger asChild><Button size="sm" disabled={!deck?.slides.length} aria-label="Present"><PlayIcon /> <span className="hidden sm:inline">Present</span></Button></DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => st().present()}><PlayIcon /> From current slide</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => st().present({ fromStart: true })}><PlayIcon /> From the beginning</DropdownMenuItem>

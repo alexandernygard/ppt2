@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup, ResizableSidebar, ResizableSidebarProvider } from "@alexandernygard/components"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup, ResizableSidebar, ResizableSidebarProvider, useIsMobile } from "@alexandernygard/components"
 import { AlertCircleIcon } from "lucide-react"
 import { useStore } from "./store"
 import { TopBar } from "./components/TopBar"
@@ -52,7 +52,9 @@ function CanvasPane() {
 }
 
 export function App() {
-  const view = useStore((s) => s.view)
+  const isMobile = useIsMobile()
+  // A phone has room for one pane, so split shows the canvas there.
+  const view = useStore((s) => (isMobile && s.view === "split" ? "canvas" : s.view))
   const [settings, setSettings] = useState(false)
   const deckId = useLibrary((s) => s.currentId)
   const roomId = useLibrary((s) => s.decks.find((d) => d.id === s.currentId)?.roomId)
@@ -78,25 +80,36 @@ export function App() {
       <div id="app-shell" className="flex h-full flex-col bg-background text-foreground">
         <TopBar onSettings={() => setSettings(true)} />
         <DriveNotice />
-        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-          <ResizablePanel defaultSize="13%" minSize="8%" maxSize="22%" className="border-r">
-            <Thumbnails />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel defaultSize="62%" minSize="30%">
-            {view === "split" ? (
-              <ResizablePanelGroup orientation="horizontal">
-                <ResizablePanel defaultSize="58%" minSize="25%"><CanvasPane /></ResizablePanel>
-                <ResizableHandle withHandle />
-                <ResizablePanel defaultSize="42%" minSize="20%"><CodePane /></ResizablePanel>
-              </ResizablePanelGroup>
-            ) : view === "canvas" ? <CanvasPane /> : <CodePane />}
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizableSidebar id="assistant" shortcut="mod+alt+b" defaultSize="25%" minSize="18%" maxSize="40%" className="border-l">
-            <RightSidebar onNeedKey={() => setSettings(true)} />
-          </ResizableSidebar>
-        </ResizablePanelGroup>
+        {isMobile ? (
+          // One pane at a time, with the slides as a filmstrip under the canvas and the sidebar in a sheet.
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1">{view === "code" ? <CodePane /> : <Canvas />}</div>
+            {view !== "code" && <div className="h-24 shrink-0 border-t"><Thumbnails orientation="horizontal" /></div>}
+            <ResizableSidebar id="assistant" side="end" shortcut="mod+alt+b" title="Co-author, layers and components">
+              <RightSidebar onNeedKey={() => setSettings(true)} />
+            </ResizableSidebar>
+          </div>
+        ) : (
+          <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+            <ResizablePanel defaultSize="13%" minSize="8%" maxSize="22%" className="border-r">
+              <Thumbnails />
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel defaultSize="62%" minSize="30%">
+              {view === "split" ? (
+                <ResizablePanelGroup orientation="horizontal">
+                  <ResizablePanel defaultSize="58%" minSize="25%"><CanvasPane /></ResizablePanel>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel defaultSize="42%" minSize="20%"><CodePane /></ResizablePanel>
+                </ResizablePanelGroup>
+              ) : view === "canvas" ? <CanvasPane /> : <CodePane />}
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizableSidebar id="assistant" side="end" shortcut="mod+alt+b" defaultSize="25%" minSize="18%" maxSize="40%" className="border-l">
+              <RightSidebar onNeedKey={() => setSettings(true)} />
+            </ResizableSidebar>
+          </ResizablePanelGroup>
+        )}
       </div>
       <RenderFarm />
       <PresentOverlay />

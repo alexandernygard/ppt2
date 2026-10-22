@@ -16,7 +16,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@alexandernygard/components": "^0.2.0",
+    "@alexandernygard/components": "^0.3.0",
     "@dagrejs/dagre": "3.1.1",
     "@ppt2/sdk": "workspace:*",
     "html-to-image": "^1.11.13",
